@@ -1,0 +1,16 @@
+# The build context must stay tiny: data/ holds the SQLite DB plus ~600
+# scraped photos and a multi-MB cloudflared log. None of it belongs in an
+# image — it is bind-mounted at runtime (see docker-compose.yml).
+data/
+.env
+/bandai30
+/dist/
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+.git/
+.github/
+.gitignore
+README.md

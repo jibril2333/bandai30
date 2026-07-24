@@ -1,0 +1,7 @@
+data/
+.env
+/bandai30
+/dist/
+*.db
+*.db-shm
+*.db-wal

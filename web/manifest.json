@@ -1,0 +1,15 @@
+{
+  "name": "Bandai 收藏",
+  "short_name": "Bandai",
+  "description": "万代 30 系列 / Metal Build 收藏追踪",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#faf7f8",
+  "theme_color": "#e8467a",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

@@ -1,0 +1,54 @@
+# Bandai30 in Docker on this Mac.
+#
+# Deployment is CI/CD-only: `git push origin main` → the self-hosted GitHub
+# Actions runner on this machine builds the image and recreates this container
+# (see .github/workflows/deploy.yml). Don't `docker compose up` by hand for
+# prod — pushing is the supported path.
+#
+# The container publishes 3010 on the host because the EXISTING host-level
+# cloudflared LaunchAgent (com.rei.cloudflared) already points its tunnel at
+# http://localhost:3010. Keeping cloudflared on the host, rather than as a
+# sidecar here, means a redeploy never drops the tunnel.
+
+services:
+  app:
+    build: .
+    image: bandai30:prod
+    container_name: bandai30
+    restart: unless-stopped
+    # Run as the host owner (uid 501 / gid 20 = staff on this Mac) so the
+    # bind-mounted SQLite DB — owned by that user — is writable. A container
+    # user that could only READ it would make every status change and every
+    # scheduled scrape fail at write time.
+    user: "501:20"
+    ports:
+      - "3010:3010"
+    environment:
+      BANDAI30_ADDR: "0.0.0.0:3010"
+      BANDAI30_DATA: "/data"
+      # Auth is enforced at the network layer (Cloudflare Access in front of
+      # the tunnel), not by the app. Mirrors the old LaunchAgent's -no-auth.
+      BANDAI30_NO_AUTH: "1"
+      # Scheduled scrape + ntfy push. The topic is injected by the workflow
+      # from a repo secret so it never lands in git.
+      BANDAI30_SCRAPE_INTERVAL: "24h"
+      BANDAI30_NTFY_TOPIC: ${BANDAI30_NTFY_TOPIC:-}
+      TZ: Asia/Tokyo
+    volumes:
+      # The real SQLite DB + ~600 scraped photos, persisted across rebuilds.
+      # NEVER bake this into the image — data/ is gitignored personal data.
+      #
+      # BANDAI30_DATA_DIR MUST be an absolute host path in CI: the Actions
+      # runner runs `docker compose` from its own _work checkout, which has no
+      # data/ dir, so a relative `./data` would mount an empty directory and
+      # the app would come up with an empty catalog. The workflow sets it to
+      # $HOME/bandai30/data. For local runs from the project root the default
+      # `./data` resolves correctly.
+      - ${BANDAI30_DATA_DIR:-./data}:/data
+    labels:
+      homepage.group: "本地服务"
+      homepage.name: "Bandai 收藏"
+      homepage.icon: "mdi-robot-industrial"
+      homepage.href: "http://localhost:3010"
+      homepage.description: "万代 30MS/30MM 模型收藏管理"
+      homepage.showStats: "true"

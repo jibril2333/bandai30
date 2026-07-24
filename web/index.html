@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bandai 收藏</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#e8467a">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Bandai 收藏">
+<link rel="stylesheet" href="/styles.css">
+<script>(function(){var t=localStorage.getItem('theme');var d=t?t==='dark':matchMedia('(prefers-color-scheme:dark)').matches;document.documentElement.setAttribute('data-theme',d?'dark':'light');})();</script>
+</head>
+<body>
+
+<header id="topbar" hidden>
+  <a href="#/" class="brand">Bandai 收藏</a>
+  <nav id="seriesnav"></nav>
+  <div class="spacer"></div>
+  <button id="theme-btn" class="ghost icon-btn" aria-label="切换深浅色">🌙</button>
+  <span id="me" class="me"></span>
+  <button id="logout-btn" class="ghost">登出</button>
+</header>
+
+<main id="main"></main>
+
+<div class="modal-bg" id="view-bg" hidden>
+  <div class="modal view-modal" id="view-card">
+    <button class="view-close" id="view-close" aria-label="关闭">×</button>
+    <div class="view-photo" id="v-photo"></div>
+    <div class="view-badges" id="v-badges"></div>
+    <h2 class="view-name" id="v-name"></h2>
+    <div class="view-namezh" id="v-namezh" hidden></div>
+    <dl class="view-facts" id="v-facts"></dl>
+    <a id="v-official" class="official-link" target="_blank" rel="noopener noreferrer" hidden>🔗 在官网查看 ↗</a>
+    <div class="view-section">
+      <div class="view-section-label">我的状态</div>
+      <div class="status-pills" id="v-status"></div>
+    </div>
+    <div class="view-section" id="v-notes-wrap" hidden>
+      <div class="view-section-label">备注</div>
+      <div class="view-notes" id="v-notes"></div>
+    </div>
+    <div class="modal-actions">
+      <div class="spacer"></div>
+      <button id="view-edit" class="primary">编辑</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-bg" hidden>
+  <div class="modal" id="modal-card">
+    <h2 id="modal-title">编辑</h2>
+    <a id="f-official" class="official-link" target="_blank" rel="noopener noreferrer" hidden>🔗 在官网查看 ↗</a>
+    <div id="f-lock-note" class="lock-note" hidden>🔒 官方数据已锁定，仅可编辑：状态 / 中文名 / 备注 / 照片</div>
+    <div class="field"><label>名称 (日/英)</label><input id="f-name" type="text"></div>
+    <div class="field"><label>中文名</label><input id="f-nameZh" type="text"></div>
+    <div class="field-row">
+      <div class="field"><label>系列</label>
+        <select id="f-series">
+          <option value="30MS">30MS</option>
+          <option value="30MP">30MP</option>
+          <option value="30MM">30MM</option>
+          <option value="30MF">30MF</option>
+        </select>
+      </div>
+      <div class="field"><label>分类</label><input id="f-category" type="text" list="cats"></div>
+    </div>
+    <datalist id="cats"></datalist>
+    <div class="field"><label>状态</label>
+      <select id="f-status">
+        <option value="none">未拥有</option>
+        <option value="wishlist">想要 (Wishlist)</option>
+        <option value="sealed">已购 · 未拆</option>
+        <option value="wip">已购 · 在做</option>
+        <option value="done">已购 · 已完成</option>
+      </select>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>发售日</label><input id="f-release" type="text" placeholder="2026-11 或 2024-09-28"></div>
+      <div class="field"><label>定价</label><input id="f-price" type="text" placeholder="2,200Yen"></div>
+    </div>
+    <div class="field">
+      <label>照片</label>
+      <div class="photo-row">
+        <input id="f-photo" type="text" placeholder="/photos/... 或 https://...">
+        <button type="button" id="f-photo-clear" class="ghost-sm">清除</button>
+      </div>
+      <div id="f-photo-drop" class="photo-drop">拖拽图片到此 / 点击上传</div>
+      <input type="file" id="f-photo-file" accept="image/*" hidden>
+      <img class="photo-preview" id="f-photo-preview" alt="">
+    </div>
+    <div class="field"><label>备注</label><textarea id="f-notes" placeholder="感想 / 改造记录 / 渠道..."></textarea></div>
+    <div class="modal-actions">
+      <button id="modal-delete" class="danger">删除</button>
+      <div class="spacer"></div>
+      <button id="modal-cancel">取消</button>
+      <button id="modal-save" class="primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
