@@ -45,6 +45,16 @@ services:
       # $HOME/bandai30/data. For local runs from the project root the default
       # `./data` resolves correctly.
       - ${BANDAI30_DATA_DIR:-./data}:/data
+    # /api/collections round-trips through SQLite, so a pass here proves the
+    # bind mount resolved and the DB is readable — not merely that the process
+    # is holding the port. wget is busybox's, already in the alpine base.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "-T", "5", "http://127.0.0.1:3010/api/collections"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # Startup is ~1s, but the first scrape tick can briefly hold the DB.
+      start_period: 20s
     labels:
       homepage.group: "本地服务"
       homepage.name: "Bandai 收藏"

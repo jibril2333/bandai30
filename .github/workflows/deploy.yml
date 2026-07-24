@@ -52,20 +52,29 @@ jobs:
           BANDAI30_DATA_DIR="$HOME/bandai30/data" \
             docker compose up -d --remove-orphans
 
-      - name: Wait for health check
-        # /api/collections round-trips through SQLite, so a 200 here proves the
-        # bind mount resolved and the DB is readable — not just that the
-        # process bound the port.
+      - name: Wait for container to report healthy
+        # Gate on Docker's own health status rather than a curl from the host:
+        # it exercises the compose healthcheck (so a broken probe fails the
+        # deploy instead of silently marking the container unhealthy forever)
+        # and it proves the app answers from INSIDE the container, not just
+        # that the published port is reachable.
         run: |
-          for i in $(seq 1 30); do
-            if curl -fs http://localhost:3010/api/collections > /dev/null; then
-              echo "up"; exit 0
-            fi
+          for i in $(seq 1 45); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' bandai30 2>/dev/null || echo missing)
+            case "$status" in
+              healthy)   echo "healthy"; exit 0 ;;
+              unhealthy) echo "container reported unhealthy" >&2; break ;;
+            esac
             sleep 2
           done
-          echo "app did not become healthy in time" >&2
+          echo "app did not become healthy in time (last status: ${status:-unknown})" >&2
           docker compose logs --tail=100
           exit 1
+
+      - name: Verify the published port serves the catalog
+        # The health probe runs inside the container; this confirms the 3010
+        # port publish that cloudflared depends on is actually wired up.
+        run: curl -fsS http://localhost:3010/api/collections > /dev/null
 
       - name: Prune dangling images
         if: always()
