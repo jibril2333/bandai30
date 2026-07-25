@@ -168,6 +168,11 @@ func main() {
 
 	scraper := scrape.New(st, photosDir)
 	notifier := notify.New(os.Getenv("BANDAI30_NTFY_SERVER"), os.Getenv("BANDAI30_NTFY_TOPIC"))
+	// In the background so a fresh install starts serving immediately (with an
+	// empty catalog) instead of blocking the listener for minutes. Runs
+	// independently of BANDAI30_SCRAPE_INTERVAL — a new user shouldn't have to
+	// configure a schedule just to get any data at all.
+	go firstRunScrape(ctx, st, scraper)
 	if iv := os.Getenv("BANDAI30_SCRAPE_INTERVAL"); iv != "" {
 		if d, perr := time.ParseDuration(iv); perr == nil && d >= time.Minute {
 			go scheduledScrape(ctx, st, scraper, notifier, d)
@@ -209,6 +214,59 @@ func main() {
 	fmt.Println("bye")
 }
 
+// scrapeAll refreshes every collection that has a scraper configured, and
+// returns the "<series> · <name>" label of each brand-new item found. A
+// collection that fails is logged and skipped so one dead source can't stop
+// the rest.
+func scrapeAll(ctx context.Context, st *store.Store, scraper *scrape.Client, logPrefix string) []string {
+	cols, err := st.ListCollections(ctx)
+	if err != nil {
+		log.Printf("%s: list collections: %v", logPrefix, err)
+		return nil
+	}
+	var fresh []string
+	for i := range cols {
+		c := cols[i]
+		if c.Scraper == "" {
+			continue
+		}
+		rep, err := scraper.ScrapeCollection(ctx, &c)
+		if err != nil {
+			log.Printf("%s %s: %v", logPrefix, c.Code, err)
+			continue
+		}
+		for _, name := range rep.NewItems {
+			fresh = append(fresh, c.Code+" · "+name)
+		}
+		time.Sleep(3 * time.Second) // be polite between sites
+	}
+	return fresh
+}
+
+// firstRunScrape populates a brand-new database in the background.
+//
+// Without this, a fresh install (empty data dir → empty DB) serves an empty
+// catalog until the first scheduled tick fires — a full day away on the
+// default 24h interval, or never if no interval is configured. It runs only
+// when the items table is empty, so an existing deployment restarting never
+// triggers an extra scrape.
+//
+// No ntfy push here on purpose: the first run turns up the ENTIRE catalog
+// (~600 items), and a notification listing all of them is noise, not news.
+func firstRunScrape(ctx context.Context, st *store.Store, scraper *scrape.Client) {
+	n, err := st.ItemCount(ctx)
+	if err != nil {
+		log.Printf("first-run scrape: count items: %v", err)
+		return
+	}
+	if n > 0 {
+		return
+	}
+	log.Print("empty catalog: running first-time scrape (this takes a few minutes)")
+	fresh := scrapeAll(ctx, st, scraper, "first-run scrape")
+	log.Printf("first-time scrape done: %d item(s) imported", len(fresh))
+}
+
 // scheduledScrape periodically refreshes every collection and pushes a phone
 // notification (via ntfy) summarising any brand-new items found.
 func scheduledScrape(ctx context.Context, st *store.Store, scraper *scrape.Client, notifier *notify.Ntfy, every time.Duration) {
@@ -219,27 +277,7 @@ func scheduledScrape(ctx context.Context, st *store.Store, scraper *scrape.Clien
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			cols, err := st.ListCollections(ctx)
-			if err != nil {
-				log.Printf("auto-scrape: list collections: %v", err)
-				continue
-			}
-			var fresh []string
-			for i := range cols {
-				c := cols[i]
-				if c.Scraper == "" {
-					continue
-				}
-				rep, err := scraper.ScrapeCollection(ctx, &c)
-				if err != nil {
-					log.Printf("auto-scrape %s: %v", c.Code, err)
-					continue
-				}
-				for _, name := range rep.NewItems {
-					fresh = append(fresh, c.Code+" · "+name)
-				}
-				time.Sleep(3 * time.Second) // be polite between sites
-			}
+			fresh := scrapeAll(ctx, st, scraper, "auto-scrape")
 			if len(fresh) > 0 {
 				log.Printf("auto-scrape: %d new item(s)", len(fresh))
 				body := strings.Join(fresh, "\n")

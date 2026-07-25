@@ -309,6 +309,14 @@ func (s *Store) GetUser(ctx context.Context, username string) (*User, error) {
 	return &u, nil
 }
 
+// ItemCount reports how many items the catalog holds. Zero means the DB was
+// just created and has never been populated — see the first-run scrape in cmd.
+func (s *Store) ItemCount(ctx context.Context) (int, error) {
+	var n int
+	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM items`).Scan(&n)
+	return n, err
+}
+
 func (s *Store) UserCount(ctx context.Context) (int, error) {
 	var n int
 	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&n)

@@ -26,6 +26,33 @@ behind Cloudflare Tunnel.
 To add another Tamashii line, add a `store.Collection` to `DefaultCollections`
 in `internal/store/seed.go` with `Scraper: "tamashii"` and the brand slug.
 
+## First run: there is no database to install
+
+**You don't need a seed database, and none ships with this repo.** The catalog
+is scraped from Bandai's own sites, so a fresh install builds its own.
+
+On startup the app creates `data/bandai30.db`, applies the schema, and seeds the
+five product lines. If the items table is then still empty, it kicks off a
+**first-run scrape in the background**: the site is up and browsable
+immediately, and items stream in over roughly **5 minutes** (~600 items and
+their photos, ~40 MB). Reload the page to watch it fill in.
+
+This only happens when the catalog is empty — restarting an existing
+deployment never re-triggers it. Ongoing refreshes are a separate thing, driven
+by `BANDAI30_SCRAPE_INTERVAL` (see below); you can also refresh one line at a
+time from the UI.
+
+Two known gaps the automatic scrape can't cover, because Bandai's brand
+listings omit them — fill them in by hand if you want them:
+
+- **Premium Bandai exclusives** — a separate lineup-page scraper.
+- **Discontinued items** whose detail page still exists, e.g.
+  `./bandai30 -data ./data -fetch-item "30MM:01_5078"`.
+
+Your own collection state (owned / wanted / building / finished, notes, Chinese
+names, uploaded photos) is yours alone and is never scraped — it lives only in
+your `data/` dir.
+
 ## Run locally
 
 ```sh
@@ -34,23 +61,34 @@ BANDAI30_ADMIN_USER=rei BANDAI30_ADMIN_PASS=changeme ./bandai30 -addr 127.0.0.1:
 # http://127.0.0.1:3010
 ```
 
-## Run on a NAS (Docker + Cloudflare Tunnel)
+## Run with Docker
 
-1. Create a tunnel: <https://one.dash.cloudflare.com> → Networks → Tunnels → Create
-2. Copy the token, then on the NAS:
+```sh
+git clone <this repo> && cd bandai30
+docker compose up -d --build
+# http://localhost:3010 — empty at first, populated within ~5 min
+```
 
-   ```sh
-   git clone <this repo> && cd bandai30
-   cp .env.example .env
-   $EDITOR .env   # paste CF_TUNNEL_TOKEN, set BANDAI30_ADMIN_USER/PASS
-   docker compose up -d --build
-   ```
+`data/` on the host is bind-mounted to `/data` in the container, so the DB and
+photos survive image rebuilds and `docker rm`. Never bake them into the image.
 
-3. In the Cloudflare dashboard, point the public hostname (e.g.
-   `bandai30.example.com`) to the **service URL** `http://app:8080`.
+Config via environment (see `.env.example`):
 
-That's it — the tunnel egresses, no inbound port forwarding needed. Cloudflare
-handles HTTPS at the edge.
+| Variable | Meaning |
+|---|---|
+| `BANDAI30_NO_AUTH` | `1` disables app login — only safe behind a trusted network layer |
+| `BANDAI30_ADMIN_USER` / `_PASS` | first-run admin, created when the users table is empty |
+| `BANDAI30_SCRAPE_INTERVAL` | e.g. `24h`; **unset means no automatic refresh ever** |
+| `BANDAI30_NTFY_TOPIC` | ntfy.sh topic for "new item" push notifications |
+| `BANDAI30_DATA_DIR` | host path to bind-mount; must be absolute when compose runs from elsewhere |
+
+### Exposing it publicly (Cloudflare Tunnel)
+
+Run `cloudflared` on the host (not as a compose service — that way redeploying
+the app never drops the tunnel) and point the public hostname at
+`http://localhost:3010`. The tunnel egresses, so no inbound port forwarding is
+needed and Cloudflare terminates HTTPS at the edge. Put Cloudflare Access in
+front of it if you run with `BANDAI30_NO_AUTH=1`.
 
 ### One-time legacy import
 
@@ -94,3 +132,6 @@ data/
 ```
 
 The two together are the entire state. Backing up = copying the `data/` dir.
+
+The catalog half of that is reproducible (delete it and the first-run scrape
+rebuilds it), but your collection state is not — that's what backups are for.
