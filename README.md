@@ -58,6 +58,18 @@ back, rather than being skipped.
 The run time is recorded *before* scraping, so a week of failing sources
 retries next week instead of hammering Bandai in a hot loop.
 
+### Refreshing by hand
+
+The **检查更新** button on the dashboard refreshes every collection; the same
+button on a collection page refreshes just that one. A refresh runs for
+minutes, far longer than an HTTP request should live, so the button starts it
+in the background and polls `GET /api/scrape/status` for progress — reloading
+the page mid-run picks the progress back up.
+
+Exactly one refresh exists process-wide, shared with the weekly job: pressing
+the button while that is running returns 409 and the button simply follows the
+run already in flight.
+
 Two known gaps the automatic scrape can't cover, because Bandai's brand
 listings omit them — fill them in by hand if you want them:
 
@@ -132,7 +144,9 @@ itself.
 | `PUT  /api/items/{id}`            | update                         |
 | `DELETE /api/items/{id}`          |                                |
 | `POST /api/upload`                | multipart file → photo URL     |
-| `POST /api/scrape/{30ms\|30mp\|30mm\|30mf}` | refresh from Bandai  |
+| `POST /api/scrape`                | start a refresh of everything  |
+| `POST /api/scrape/{slug}`         | start a refresh of one line    |
+| `GET  /api/scrape/status`         | progress of the current run    |
 | `GET  /api/stats`                 | per-series status counts       |
 | `GET  /api/categories?series=`    | distinct categories            |
 | `GET  /api/export`                | downloads full JSON            |

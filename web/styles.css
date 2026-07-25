@@ -198,6 +198,34 @@ a.metric:hover { border-color: var(--primary); }
 
 /* compact filter bar: search + category + status chips on one wrapping row */
 .head-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+/* --- manual refresh button --- */
+.dash-head { display: flex; align-items: center; gap: 12px; }
+.dash-head h1 { margin-bottom: 0; }
+.dash-head .refresh-btn { margin-left: auto; }
+.refresh-btn {
+  height: 30px; padding: 0 12px; font-size: 12.5px; font-weight: 500;
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  background: var(--card); color: var(--text-dim);
+  border: 1px solid var(--border-strong); border-radius: 8px; cursor: pointer;
+  transition: color .15s var(--ease), border-color .15s var(--ease), background .15s var(--ease);
+}
+.refresh-btn:hover:not(:disabled) { color: var(--primary); border-color: var(--primary); }
+.refresh-btn:disabled { cursor: default; }
+/* The label swaps between "检查更新" and a live "更新中 2/5 · 30MM", so the
+   width changes as it runs — reserve room to stop the header jumping. */
+.refresh-btn .rb-label { min-width: 4.5em; text-align: left; }
+.refresh-btn.running { color: var(--primary); border-color: var(--primary); }
+.refresh-btn.running::before {
+  content: ''; width: 11px; height: 11px; margin-right: -2px;
+  border: 2px solid currentColor; border-right-color: transparent;
+  border-radius: 50%; animation: rb-spin .7s linear infinite;
+}
+.refresh-btn.running .rb-icon { display: none; }  /* replaced by the spinner */
+.refresh-btn.ok { color: #10b981; border-color: #10b981; }
+.refresh-btn.failed { color: #ef4444; border-color: #ef4444; }
+@keyframes rb-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .refresh-btn.running::before { animation: none; } }
 .icon-btn { width: 34px; padding: 0; font-size: 15px; }
 .view-toggle { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; }
 .view-toggle button {

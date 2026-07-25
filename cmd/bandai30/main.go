@@ -196,6 +196,7 @@ func main() {
 		PhotosDir: photosDir,
 		WebFS:     webFS,
 		NoAuth:    *noAuth,
+		BaseCtx:   ctx,
 	}
 
 	httpSrv := &http.Server{
@@ -222,35 +223,6 @@ func main() {
 	fmt.Println("bye")
 }
 
-// scrapeAll refreshes every collection that has a scraper configured, and
-// returns the "<series> · <name>" label of each brand-new item found. A
-// collection that fails is logged and skipped so one dead source can't stop
-// the rest.
-func scrapeAll(ctx context.Context, st *store.Store, scraper *scrape.Client, logPrefix string) []string {
-	cols, err := st.ListCollections(ctx)
-	if err != nil {
-		log.Printf("%s: list collections: %v", logPrefix, err)
-		return nil
-	}
-	var fresh []string
-	for i := range cols {
-		c := cols[i]
-		if c.Scraper == "" {
-			continue
-		}
-		rep, err := scraper.ScrapeCollection(ctx, &c)
-		if err != nil {
-			log.Printf("%s %s: %v", logPrefix, c.Code, err)
-			continue
-		}
-		for _, name := range rep.NewItems {
-			fresh = append(fresh, c.Code+" · "+name)
-		}
-		time.Sleep(3 * time.Second) // be polite between sites
-	}
-	return fresh
-}
-
 // firstRunScrape populates a brand-new database in the background.
 //
 // Without this, a fresh install (empty data dir → empty DB) serves an empty
@@ -274,7 +246,11 @@ func firstRunScrape(ctx context.Context, st *store.Store, scraper *scrape.Client
 	if err := st.SetMetaTime(ctx, lastScrapeKey, time.Now()); err != nil {
 		log.Printf("first-run scrape: record run time: %v", err)
 	}
-	fresh := scrapeAll(ctx, st, scraper, "first-run scrape")
+	fresh, err := scraper.Run(ctx, "", "first-run")
+	if err != nil {
+		log.Printf("first-time scrape: %v", err)
+		return
+	}
 	log.Printf("first-time scrape done: %d item(s) imported", len(fresh))
 }
 
@@ -323,7 +299,13 @@ func scheduledScrape(ctx context.Context, st *store.Store, scraper *scrape.Clien
 		if err := st.SetMetaTime(ctx, lastScrapeKey, time.Now()); err != nil {
 			log.Printf("auto-scrape: record run time: %v", err)
 		}
-		fresh := scrapeAll(ctx, st, scraper, "auto-scrape")
+		fresh, err := scraper.Run(ctx, "", "weekly")
+		if err != nil {
+			// Busy means a manual refresh is in flight; it covers the same
+			// ground, so skip this tick rather than queueing behind it.
+			log.Printf("auto-scrape: %v", err)
+			continue
+		}
 		if len(fresh) > 0 {
 			log.Printf("auto-scrape: %d new item(s)", len(fresh))
 			body := strings.Join(fresh, "\n")

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rei/bandai30/internal/store"
@@ -40,6 +41,11 @@ type Client struct {
 	HTTP      *http.Client
 	PhotosDir string
 	Store     *store.Store
+
+	// mu guards state, the single in-flight refresh shared by the weekly
+	// scheduler and the UI's refresh button. See run.go.
+	mu    sync.Mutex
+	state RunState
 }
 
 func New(st *store.Store, photosDir string) *Client {

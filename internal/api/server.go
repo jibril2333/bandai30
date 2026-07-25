@@ -22,8 +22,9 @@ type Server struct {
 	Store     *store.Store
 	Scraper   *scrape.Client
 	PhotosDir string
-	WebFS     fs.FS // embedded SPA (web/*)
-	NoAuth    bool  // if true, bypass session auth; everyone is "anon"
+	WebFS     fs.FS           // embedded SPA (web/*)
+	NoAuth    bool            // if true, bypass session auth; everyone is "anon"
+	BaseCtx   context.Context // process lifetime; outlives any single request
 
 	verOnce  sync.Once
 	assetVer string
@@ -71,7 +72,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /api/items/{id}", authd(s.updateItem))
 	mux.Handle("DELETE /api/items/{id}", authd(s.deleteItem))
 	mux.Handle("POST /api/upload", authd(s.uploadPhoto))
-	mux.Handle("POST /api/scrape/{slug}", authd(s.runScrape))
+	mux.Handle("POST /api/scrape", authd(s.startScrape))
+	mux.Handle("POST /api/scrape/{slug}", authd(s.startScrape))
+	mux.Handle("GET /api/scrape/status", authd(s.scrapeStatus))
 	mux.Handle("GET /api/collections", authd(s.listCollections))
 	mux.Handle("GET /api/stats", authd(s.statsHandler))
 	mux.Handle("GET /api/categories", authd(s.categoriesHandler))

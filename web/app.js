@@ -71,7 +71,9 @@ const api = {
     : api.fetch(`/api/items/${encodeURIComponent(it.id)}`, { method: 'PUT', body: stripPrivate(it) }),
   deleteItem: (id) => api.fetch(`/api/items/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   upload: (file) => { const fd = new FormData(); fd.append('file', file); return api.fetch('/api/upload', { method: 'POST', body: fd }); },
-  scrape: (slug) => api.fetch(`/api/scrape/${slug}`, { method: 'POST' }),
+  // slug omitted = refresh every collection
+  scrape: (slug) => api.fetch('/api/scrape' + (slug ? `/${slug}` : ''), { method: 'POST' }),
+  scrapeStatus: () => api.fetch('/api/scrape/status'),
 };
 function stripPrivate(o) { const r = { ...o }; delete r._isNew; return r; }
 
@@ -232,7 +234,10 @@ async function renderLanding() {
     </div>` : '';
 
   $('main').innerHTML = `<div class="landing dash">
-    <h1>我的收藏库</h1>
+    <div class="dash-head">
+      <h1>我的收藏库</h1>
+      ${refreshBtnHTML('')}
+    </div>
     <div class="dash-metrics">
       <div class="metric"><div class="mv">${total}</div><div class="ml">总收录</div></div>
       <a href="#/mine" class="metric"><div class="mv ok">${owned.length}</div><div class="ml">已拥有 ›</div></a>
@@ -243,6 +248,7 @@ async function renderLanding() {
     ${sections}
   </div>`;
   $('main').querySelectorAll('.upcoming-card').forEach(el => { el.onclick = () => openView(el.dataset.id); });
+  wireRefresh();
 }
 
 // ---------- my collection (aggregate across all series) ----------
@@ -332,6 +338,7 @@ function renderCollectionPage() {
         <span class="sub">${escapeHtml(col.name)}${col.tagline ? ' · ' + escapeHtml(col.tagline) : ''} · 共 ${counts.all} 件 · 已收集 <span id="owned-count">${owned}</span></span>
         <div class="head-actions">
           <span class="save-state" id="save-state"></span>
+          ${col.scraper ? refreshBtnHTML(col.slug) : ''}
           <div class="view-toggle">
             <button data-v="grid" class="${state.view === 'grid' ? 'active' : ''}" aria-label="网格视图">▦</button>
             <button data-v="list" class="${state.view === 'list' ? 'active' : ''}" aria-label="列表视图">☰</button>
@@ -356,7 +363,91 @@ function renderCollectionPage() {
       <div class="empty" id="empty" hidden>没有匹配的条目</div>
     </div>`;
   wireToolbar();
+  wireRefresh();
   buildGrid();
+}
+
+// ---------- 手动更新 ----------
+// A refresh runs on the server for minutes, so the button fires and forgets,
+// then polls for progress. Only one run exists process-wide (the weekly job
+// uses the same lock), so the button also reflects a scrape someone else —
+// or the scheduler — started.
+
+let scrapeTimer = null;
+
+function refreshBtnHTML(slug) {
+  return `<button class="refresh-btn" id="refresh-btn" data-slug="${escapeAttr(slug || '')}" title="从万代官网抓取最新商品"><span class="rb-icon">↻</span><span class="rb-label">检查更新</span></button>`;
+}
+
+function paintRefreshBtn(st) {
+  const btn = $('refresh-btn');
+  if (!btn) return;
+  const label = btn.querySelector('.rb-label');
+  btn.classList.toggle('running', !!st.running);
+  btn.disabled = !!st.running;
+  if (st.running) {
+    const scope = st.current ? ` · ${st.current}` : '';
+    const prog = st.total ? ` ${st.completed}/${st.total}` : '';
+    label.textContent = `更新中${prog}${scope}`;
+  } else {
+    label.textContent = '检查更新';
+  }
+}
+
+function refreshDone(st) {
+  const btn = $('refresh-btn');
+  if (!btn) return;
+  const label = btn.querySelector('.rb-label');
+  btn.classList.remove('running');
+  btn.disabled = false;
+  const n = (st.newItems || []).length;
+  if (st.err) {
+    btn.classList.add('failed');
+    label.textContent = '更新失败';
+  } else {
+    btn.classList.add('ok');
+    label.textContent = n ? `发现 ${n} 个新品` : '已是最新';
+  }
+  // Let the result read for a moment, then settle back. A run that found
+  // something re-renders, so the new items actually appear.
+  setTimeout(() => {
+    if (n) { render(); return; }
+    btn.classList.remove('ok', 'failed');
+    paintRefreshBtn({ running: false });
+  }, 2500);
+}
+
+function pollScrape() {
+  clearTimeout(scrapeTimer);
+  scrapeTimer = setTimeout(async () => {
+    let st;
+    try { st = await api.scrapeStatus(); } catch { return; }
+    if (!$('refresh-btn')) return;   // navigated away
+    if (st.running) { paintRefreshBtn(st); pollScrape(); }
+    else refreshDone(st);
+  }, 1500);
+}
+
+function wireRefresh() {
+  const btn = $('refresh-btn');
+  if (!btn) return;
+  btn.onclick = async () => {
+    paintRefreshBtn({ running: true });
+    try {
+      paintRefreshBtn(await api.scrape(btn.dataset.slug));
+    } catch (e) {
+      // 409 = the weekly job (or another tab) got there first; just follow it.
+      if (!/already running/i.test(e.message || '')) {
+        btn.classList.add('failed');
+        btn.querySelector('.rb-label').textContent = '启动失败';
+        btn.disabled = false;
+        return;
+      }
+    }
+    pollScrape();
+  };
+  // Pick up a run already in flight (weekly job, or started in another tab).
+  api.scrapeStatus().then(st => { if (st.running) { paintRefreshBtn(st); pollScrape(); } }).catch(() => {});
 }
 
 function activeFilterCount() {
