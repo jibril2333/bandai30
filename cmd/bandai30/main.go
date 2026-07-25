@@ -168,19 +168,27 @@ func main() {
 
 	scraper := scrape.New(st, photosDir)
 	notifier := notify.New(os.Getenv("BANDAI30_NTFY_SERVER"), os.Getenv("BANDAI30_NTFY_TOPIC"))
-	// In the background so a fresh install starts serving immediately (with an
-	// empty catalog) instead of blocking the listener for minutes. Runs
-	// independently of BANDAI30_SCRAPE_INTERVAL — a new user shouldn't have to
-	// configure a schedule just to get any data at all.
-	go firstRunScrape(ctx, st, scraper)
+	var interval time.Duration
 	if iv := os.Getenv("BANDAI30_SCRAPE_INTERVAL"); iv != "" {
 		if d, perr := time.ParseDuration(iv); perr == nil && d >= time.Minute {
-			go scheduledScrape(ctx, st, scraper, notifier, d)
+			interval = d
 			log.Printf("auto-scrape every %s (ntfy: %v)", d, notifier.Enabled())
 		} else {
-			log.Printf("ignoring BANDAI30_SCRAPE_INTERVAL=%q (need a duration ≥ 1m, e.g. 24h)", iv)
+			log.Printf("ignoring BANDAI30_SCRAPE_INTERVAL=%q (need a duration ≥ 1m, e.g. 168h)", iv)
 		}
 	}
+	// One goroutine for both, in sequence: the server starts listening
+	// immediately (a fresh install would otherwise block it for minutes), and
+	// the first-run import can't race the scheduled one — running two scrapes
+	// against the same sources at once would double the load and interleave
+	// writes. The first-run pass is independent of the interval: a new user
+	// shouldn't have to configure a schedule to get any data at all.
+	go func() {
+		firstRunScrape(ctx, st, scraper)
+		if interval > 0 {
+			scheduledScrape(ctx, st, scraper, notifier, interval)
+		}
+	}()
 
 	srv := &api.Server{
 		Store:     st,
@@ -263,32 +271,71 @@ func firstRunScrape(ctx context.Context, st *store.Store, scraper *scrape.Client
 		return
 	}
 	log.Print("empty catalog: running first-time scrape (this takes a few minutes)")
+	if err := st.SetMetaTime(ctx, lastScrapeKey, time.Now()); err != nil {
+		log.Printf("first-run scrape: record run time: %v", err)
+	}
 	fresh := scrapeAll(ctx, st, scraper, "first-run scrape")
 	log.Printf("first-time scrape done: %d item(s) imported", len(fresh))
 }
 
-// scheduledScrape periodically refreshes every collection and pushes a phone
-// notification (via ntfy) summarising any brand-new items found.
+// lastScrapeKey stores when the last refresh was ATTEMPTED, so the schedule
+// survives restarts.
+const lastScrapeKey = "last_scrape_at"
+
+// settleDelay holds off an overdue scrape briefly after startup, so a
+// redeploy doesn't fire a scrape while the container is still settling.
+const settleDelay = 2 * time.Minute
+
+// scheduledScrape refreshes every collection on a persistent schedule and
+// pushes a phone notification (via ntfy) summarising any brand-new items.
+//
+// The interval is measured from the last attempt RECORDED IN THE DATABASE,
+// not from process start. A plain time.Ticker restarts its countdown on every
+// launch, which is fine at 24h but breaks at weekly cadence: this app is
+// redeployed by git push and the Mac sleeps/reboots, so a week-long timer
+// would keep getting reset and might never fire at all. Persisting the
+// timestamp also means a scrape missed while the machine was off runs shortly
+// after it comes back, instead of being silently skipped.
 func scheduledScrape(ctx context.Context, st *store.Store, scraper *scrape.Client, notifier *notify.Ntfy, every time.Duration) {
-	t := time.NewTicker(every)
-	defer t.Stop()
 	for {
+		wait := settleDelay
+		last, err := st.GetMetaTime(ctx, lastScrapeKey)
+		if err != nil {
+			log.Printf("auto-scrape: read last run: %v (retrying in %s)", err, wait)
+		} else if !last.IsZero() {
+			if due := time.Until(last.Add(every)); due > wait {
+				wait = due
+			}
+			log.Printf("auto-scrape: last run %s, next in %s", last.Format(time.RFC3339), wait.Round(time.Minute))
+		} else {
+			log.Printf("auto-scrape: no previous run recorded, first refresh in %s", wait)
+		}
+
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
-			fresh := scrapeAll(ctx, st, scraper, "auto-scrape")
-			if len(fresh) > 0 {
-				log.Printf("auto-scrape: %d new item(s)", len(fresh))
-				body := strings.Join(fresh, "\n")
-				if len(fresh) > 20 {
-					body = strings.Join(fresh[:20], "\n") + "\n…"
-				}
-				title := fmt.Sprintf("Bandai30: %d new item(s)", len(fresh))
-				if err := notifier.Send(ctx, title, body, "new,robot"); err != nil {
-					log.Printf("auto-scrape: ntfy send: %v", err)
-				}
+		case <-time.After(wait):
+		}
+
+		// Record the attempt BEFORE checking results: if every source is down
+		// we must still wait a full interval, or a failing scrape would retry
+		// in a hot loop and hammer Bandai's servers.
+		if err := st.SetMetaTime(ctx, lastScrapeKey, time.Now()); err != nil {
+			log.Printf("auto-scrape: record run time: %v", err)
+		}
+		fresh := scrapeAll(ctx, st, scraper, "auto-scrape")
+		if len(fresh) > 0 {
+			log.Printf("auto-scrape: %d new item(s)", len(fresh))
+			body := strings.Join(fresh, "\n")
+			if len(fresh) > 20 {
+				body = strings.Join(fresh[:20], "\n") + "\n…"
 			}
+			title := fmt.Sprintf("Bandai30: %d new item(s)", len(fresh))
+			if err := notifier.Send(ctx, title, body, "new,robot"); err != nil {
+				log.Printf("auto-scrape: ntfy send: %v", err)
+			}
+		} else {
+			log.Print("auto-scrape: no new items")
 		}
 	}
 }

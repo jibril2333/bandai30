@@ -29,9 +29,11 @@ services:
       # Auth is enforced at the network layer (Cloudflare Access in front of
       # the tunnel), not by the app. Mirrors the old LaunchAgent's -no-auth.
       BANDAI30_NO_AUTH: "1"
-      # Scheduled scrape + ntfy push. The topic is injected by the workflow
-      # from a repo secret so it never lands in git.
-      BANDAI30_SCRAPE_INTERVAL: "24h"
+      # Weekly refresh + ntfy push. Measured from the last run recorded in the
+      # DB, not from container start, so redeploys don't keep resetting the
+      # countdown. The ntfy topic is injected by the workflow from a repo
+      # secret so it never lands in git.
+      BANDAI30_SCRAPE_INTERVAL: "168h"
       BANDAI30_NTFY_TOPIC: ${BANDAI30_NTFY_TOPIC:-}
       TZ: Asia/Tokyo
     volumes:

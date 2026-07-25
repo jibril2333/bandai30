@@ -38,9 +38,25 @@ immediately, and items stream in over roughly **5 minutes** (~600 items and
 their photos, ~40 MB). Reload the page to watch it fill in.
 
 This only happens when the catalog is empty — restarting an existing
-deployment never re-triggers it. Ongoing refreshes are a separate thing, driven
-by `BANDAI30_SCRAPE_INTERVAL` (see below); you can also refresh one line at a
-time from the UI.
+deployment never re-triggers it. You can also refresh one line at a time from
+the UI.
+
+## Weekly refresh
+
+With `BANDAI30_SCRAPE_INTERVAL=168h` (the compose default) every collection is
+re-scraped once a week, and any brand-new items are pushed to your phone via
+ntfy. New releases are announced weeks ahead of shipping, so a weekly check is
+plenty; drop it to `24h` if you want to see announcements the day they land.
+
+The countdown is measured from the **last run recorded in the database**, not
+from process start. That matters at weekly cadence: a plain timer restarts on
+every launch, and since this app redeploys on `git push` and the host sleeps
+and reboots, a week-long timer could keep getting reset and never fire. It also
+means a refresh missed while the machine was off runs shortly after it comes
+back, rather than being skipped.
+
+The run time is recorded *before* scraping, so a week of failing sources
+retries next week instead of hammering Bandai in a hot loop.
 
 Two known gaps the automatic scrape can't cover, because Bandai's brand
 listings omit them — fill them in by hand if you want them:
@@ -78,7 +94,7 @@ Config via environment (see `.env.example`):
 |---|---|
 | `BANDAI30_NO_AUTH` | `1` disables app login — only safe behind a trusted network layer |
 | `BANDAI30_ADMIN_USER` / `_PASS` | first-run admin, created when the users table is empty |
-| `BANDAI30_SCRAPE_INTERVAL` | e.g. `24h`; **unset means no automatic refresh ever** |
+| `BANDAI30_SCRAPE_INTERVAL` | e.g. `168h` (weekly); **unset means no automatic refresh ever** |
 | `BANDAI30_NTFY_TOPIC` | ntfy.sh topic for "new item" push notifications |
 | `BANDAI30_DATA_DIR` | host path to bind-mount; must be absolute when compose runs from elsewhere |
 

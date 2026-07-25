@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -307,6 +308,44 @@ func (s *Store) GetUser(ctx context.Context, username string) (*User, error) {
 		return nil, err
 	}
 	return &u, nil
+}
+
+// --- Meta (small persistent key/value bag) ---
+
+// GetMeta returns the stored value, or "" when the key was never set.
+func (s *Store) GetMeta(ctx context.Context, key string) (string, error) {
+	var v string
+	err := s.DB.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = ?`, key).Scan(&v)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return v, err
+}
+
+func (s *Store) SetMeta(ctx context.Context, key, value string) error {
+	_, err := s.DB.ExecContext(ctx,
+		`INSERT INTO meta(key, value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		key, value)
+	return err
+}
+
+// GetMetaTime reads a key written by SetMetaTime. Zero time = never set.
+func (s *Store) GetMetaTime(ctx context.Context, key string) (time.Time, error) {
+	v, err := s.GetMeta(ctx, key)
+	if err != nil || v == "" {
+		return time.Time{}, err
+	}
+	sec, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		// A corrupt value shouldn't wedge the scheduler forever; treat it as
+		// "never" so the caller falls back to running now.
+		return time.Time{}, nil
+	}
+	return time.Unix(sec, 0), nil
+}
+
+func (s *Store) SetMetaTime(ctx context.Context, key string, t time.Time) error {
+	return s.SetMeta(ctx, key, strconv.FormatInt(t.Unix(), 10))
 }
 
 // ItemCount reports how many items the catalog holds. Zero means the DB was
