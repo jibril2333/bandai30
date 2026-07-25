@@ -43,14 +43,28 @@ jobs:
         run: docker compose build
 
       - name: Deploy (recreate container with the new image)
-        # The runner checks the repo out to its own _work dir, which has no
-        # data/ (gitignored). Mount the real DB + photos from the project dir
-        # by absolute path so the container sees the owner's actual catalog.
+        # The runner checks the repo out to its own _work dir, which has NO
+        # data/ (gitignored). The container must bind-mount the real DB +
+        # photos from the owner's project dir, by absolute path.
+        #
+        # BANDAI30_DATA_DIR is set here in `env:` (not inline `VAR=x cmd`) so
+        # it is exported into the whole step's shell for `docker compose` to
+        # interpolate — an inline assignment failed to propagate once and the
+        # container silently fell back to the compose default `./data`, which
+        # resolves to the EMPTY _work checkout; the app then created a blank DB
+        # there and served an empty catalog while the real data sat untouched.
+        # The guard below makes that failure mode impossible: if the resolved
+        # data dir has no real bandai30.db, the deploy aborts instead of
+        # booting on an empty database.
         env:
           BANDAI30_NTFY_TOPIC: ${{ secrets.BANDAI30_NTFY_TOPIC }}
+          BANDAI30_DATA_DIR: /Users/rei/bandai30/data
         run: |
-          BANDAI30_DATA_DIR="$HOME/bandai30/data" \
-            docker compose up -d --remove-orphans
+          if [ ! -s "$BANDAI30_DATA_DIR/bandai30.db" ]; then
+            echo "::error::real DB not found at $BANDAI30_DATA_DIR/bandai30.db — refusing to deploy onto an empty data dir" >&2
+            exit 1
+          fi
+          docker compose up -d --remove-orphans
 
       - name: Wait for container to report healthy
         # Gate on Docker's own health status rather than a curl from the host:
