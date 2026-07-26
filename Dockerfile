@@ -25,7 +25,7 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=build /out/bandai30 /usr/local/bin/bandai30
-ENV BANDAI30_ADDR=0.0.0.0:8080 \
+ENV BANDAI30_ADDR=0.0.0.0:3010 \
     BANDAI30_DATA=/data \
     TZ=Asia/Tokyo
 # Mountpoint only. The real DB + photos live on the host and are bind-mounted
@@ -35,5 +35,5 @@ ENV BANDAI30_ADDR=0.0.0.0:8080 \
 RUN mkdir -p /data
 # Deliberately no USER: compose pins the container to the host owner's uid:gid
 # so the bind-mounted SQLite file is writable. See docker-compose.yml.
-EXPOSE 8080
+EXPOSE 3010
 ENTRYPOINT ["bandai30"]

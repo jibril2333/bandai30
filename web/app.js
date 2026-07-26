@@ -74,16 +74,14 @@ const api = {
     const qs = new URLSearchParams(Object.fromEntries(Object.entries(q || {}).filter(([_, v]) => v && v !== 'all')));
     return api.fetch('/api/items' + (qs.toString() ? `?${qs}` : ''));
   },
-  saveItem: (it) => it._isNew
-    ? api.fetch('/api/items', { method: 'POST', body: stripPrivate(it) })
-    : api.fetch(`/api/items/${encodeURIComponent(it.id)}`, { method: 'PUT', body: stripPrivate(it) }),
+  // PUT only: the catalog comes from scraping, so there is no create path.
+  saveItem: (it) => api.fetch(`/api/items/${encodeURIComponent(it.id)}`, { method: 'PUT', body: it }),
   deleteItem: (id) => api.fetch(`/api/items/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   upload: (file) => { const fd = new FormData(); fd.append('file', file); return api.fetch('/api/upload', { method: 'POST', body: fd }); },
   // slug omitted = refresh every collection
   scrape: (slug) => api.fetch('/api/scrape' + (slug ? `/${slug}` : ''), { method: 'POST' }),
   scrapeStatus: () => api.fetch('/api/scrape/status'),
 };
-function stripPrivate(o) { const r = { ...o }; delete r._isNew; return r; }
 
 // ---------- routing ----------
 function currentRoute() {
@@ -763,14 +761,6 @@ function openEdit(id) {
   $('modal-delete').style.display = '';
   $('modal-bg').hidden = false;
 }
-function openAdd() {
-  state.editingId = null;
-  $('modal-title').textContent = '添加新条目';
-  fillForm({ id: '', name: '', nameZh: '', series: state.col ? state.col.code : (state.collections[0] || {}).code,
-    category: '', status: 'none', releaseDate: '', price: '', photoUrl: '', notes: '' });
-  $('modal-delete').style.display = 'none';
-  $('modal-bg').hidden = false;
-}
 function fillForm(m) {
   $('f-name').value = m.name || '';
   $('f-nameZh').value = m.nameZh || '';
@@ -812,7 +802,6 @@ async function saveModal() {
     notes: $('f-notes').value.trim(),
   };
   if (!payload.name && !payload.nameZh) { alert('请至少填写一个名称'); return; }
-  if (!state.editingId) payload._isNew = true;
   showSave('保存中...', '#7a7074');
   try {
     await api.saveItem(payload);

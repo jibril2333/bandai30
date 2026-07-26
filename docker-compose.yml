@@ -5,10 +5,10 @@
 # (see .github/workflows/deploy.yml). Don't `docker compose up` by hand for
 # prod — pushing is the supported path.
 #
-# The container publishes 3010 on the host because the EXISTING host-level
-# cloudflared LaunchAgent (com.rei.cloudflared) already points its tunnel at
-# http://localhost:3010. Keeping cloudflared on the host, rather than as a
-# sidecar here, means a redeploy never drops the tunnel.
+# The container publishes 3010 on the host because the tunnel already points
+# there: cloudflared runs as the root system daemon
+# /Library/LaunchDaemons/com.cloudflare.cloudflared.plist. Keeping it on the
+# host, rather than as a sidecar here, means a redeploy never drops the tunnel.
 
 services:
   app:

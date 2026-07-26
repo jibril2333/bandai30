@@ -21,18 +21,6 @@ type Collection struct {
 	SortOrder  int    `json:"sortOrder"`
 }
 
-func (s *Store) UpsertCollection(ctx context.Context, c *Collection) error {
-	_, err := s.DB.ExecContext(ctx, `
-		INSERT INTO collections(code, slug, name, family, tagline, color, scraper, scraper_arg, type, sort_order)
-		VALUES(?,?,?,?,?,?,?,?,?,?)
-		ON CONFLICT(code) DO UPDATE SET
-			slug=excluded.slug, name=excluded.name, family=excluded.family, tagline=excluded.tagline,
-			color=excluded.color, scraper=excluded.scraper, scraper_arg=excluded.scraper_arg,
-			type=excluded.type, sort_order=excluded.sort_order`,
-		c.Code, c.Slug, c.Name, c.Family, c.Tagline, c.Color, c.Scraper, c.ScraperArg, c.Type, c.SortOrder)
-	return err
-}
-
 // InsertCollectionIfAbsent adds a collection only if its code isn't present, so
 // startup seeding never overwrites user edits.
 func (s *Store) InsertCollectionIfAbsent(ctx context.Context, c *Collection) (bool, error) {
@@ -72,12 +60,6 @@ func (s *Store) GetCollectionBySlug(ctx context.Context, slug string) (*Collecti
 		FROM collections WHERE slug=?`, slug))
 }
 
-func (s *Store) GetCollectionByCode(ctx context.Context, code string) (*Collection, error) {
-	return s.scanCollection(s.DB.QueryRowContext(ctx, `
-		SELECT code, slug, name, family, tagline, color, scraper, scraper_arg, type, sort_order
-		FROM collections WHERE code=?`, code))
-}
-
 func (s *Store) scanCollection(row *sql.Row) (*Collection, error) {
 	var c Collection
 	err := row.Scan(&c.Code, &c.Slug, &c.Name, &c.Family, &c.Tagline, &c.Color, &c.Scraper, &c.ScraperArg, &c.Type, &c.SortOrder)
@@ -88,10 +70,4 @@ func (s *Store) scanCollection(row *sql.Row) (*Collection, error) {
 		return nil, err
 	}
 	return &c, nil
-}
-
-func (s *Store) CollectionCount(ctx context.Context) (int, error) {
-	var n int
-	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM collections`).Scan(&n)
-	return n, err
 }

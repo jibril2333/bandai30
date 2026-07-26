@@ -18,14 +18,6 @@ import (
 
 const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
 
-// Brand identifiers used by bandai-hobby.net URLs.
-var Brands = []string{"30ms", "30mp", "30mm", "30mf"}
-
-// SeriesOf maps a brand slug to the canonical series tag stored in items.series.
-func SeriesOf(brand string) string {
-	return strings.ToUpper(brand)
-}
-
 var (
 	cardBlockRE = regexp.MustCompile(`(?s)<a href="https://global\.bandai-hobby\.net/en-us/item/(01_\d+)/"[^>]*>(.*?)</a>`)
 	titleRE     = regexp.MustCompile(`<div class="p-card__tit">([^<]*)</div>`)
