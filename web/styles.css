@@ -15,6 +15,7 @@
 
   --s-none-bg: #f3f1f2;     --s-none-fg: #6b6266;
   --s-wishlist-bg: #f3e8ff; --s-wishlist-fg: #7e22ce;
+  --s-ordered-bg: #ffedd5;  --s-ordered-fg: #c2410c;
   --s-sealed-bg: #dbeafe;   --s-sealed-fg: #1d4ed8;
   --s-wip-bg: #fef3c7;      --s-wip-fg: #b45309;
   --s-done-bg: #d1fae5;     --s-done-fg: #047857;
@@ -39,6 +40,7 @@
   --shadow: 0 1px 2px rgba(0,0,0,.35), 0 4px 14px rgba(0,0,0,.35);
   --s-none-bg: rgba(255,255,255,.07); --s-none-fg: #b3abae;
   --s-wishlist-bg: rgba(168,85,247,.22); --s-wishlist-fg: #d8b4fe;
+  --s-ordered-bg: rgba(249,115,22,.22); --s-ordered-fg: #fdba74;
   --s-sealed-bg: rgba(59,130,246,.22); --s-sealed-fg: #93c5fd;
   --s-wip-bg: rgba(245,158,11,.22); --s-wip-fg: #fcd34d;
   --s-done-bg: rgba(16,185,129,.22); --s-done-fg: #6ee7b7;
@@ -138,12 +140,14 @@ button.ghost-sm {
 .landing .lede { color: var(--text-dim); font-size: 13px; margin-bottom: 24px; }
 /* --- dashboard --- */
 .dash h1 { margin-bottom: 4px; }
-.dash-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 16px 0 24px; }
+/* --cols is set inline per render: 4 tiles normally, 5 when 未到货 shows. */
+.dash-metrics { display: grid; grid-template-columns: repeat(var(--cols, 4), 1fr); gap: 10px; margin: 16px 0 24px; }
 .metric { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 13px 15px; text-decoration: none; color: var(--text); transition: border-color .15s; }
 a.metric:hover { border-color: var(--primary); }
 .metric .mv { font-size: 23px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
 .metric .mv.ok { color: #10b981; }
 .metric .mv.want { color: var(--primary); }
+.metric .mv.way, .mine-stats .stat .n.way { color: var(--s-ordered-fg); }
 .metric .ml { font-size: 12px; color: var(--text-dim); margin-top: 3px; }
 .dash-sec { margin-bottom: 26px; }
 .dash-sec-h { font-size: 13px; font-weight: 600; color: var(--text-dim); margin-bottom: 12px; }
@@ -244,6 +248,7 @@ a.metric:hover { border-color: var(--primary); }
 .row-item.is-marked.s-done { border-left-color: #10b981; }
 .row-item.is-marked.s-wip { border-left-color: #f59e0b; }
 .row-item.is-marked.s-sealed { border-left-color: #3b82f6; }
+.row-item.is-marked.s-ordered { border-left-color: #f97316; }
 .row-item.is-marked.s-wishlist { border-left-color: #a855f7; }
 .ri-photo { flex: 0 0 38px; width: 38px; height: 38px; background: var(--bg); border-radius: 7px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
 .ri-photo img { width: 100%; height: 100%; object-fit: cover; }
@@ -303,6 +308,7 @@ a.metric:hover { border-color: var(--primary); }
 /* status-chip colors reuse the status palette */
 .status-chip.s-none     { background: var(--s-none-bg);     color: var(--s-none-fg); }
 .status-chip.s-wishlist { background: var(--s-wishlist-bg); color: var(--s-wishlist-fg); }
+.status-chip.s-ordered  { background: var(--s-ordered-bg);  color: var(--s-ordered-fg); }
 .status-chip.s-sealed   { background: var(--s-sealed-bg);   color: var(--s-sealed-fg); }
 .status-chip.s-wip      { background: var(--s-wip-bg);      color: var(--s-wip-fg); }
 .status-chip.s-done     { background: var(--s-done-bg);     color: var(--s-done-fg); }
@@ -323,6 +329,7 @@ a.metric:hover { border-color: var(--primary); }
 .card.is-marked.s-done   { border-top-color: #10b981; }
 .card.is-marked.s-wip    { border-top-color: #f59e0b; }
 .card.is-marked.s-sealed { border-top-color: #3b82f6; }
+.card.is-marked.s-ordered { border-top-color: #f97316; }
 .card.is-marked.s-wishlist { border-top-color: #a855f7; }
 
 .card .photo {
@@ -363,6 +370,7 @@ a.metric:hover { border-color: var(--primary); }
 .badge.cat { background: var(--s-none-bg); color: var(--text-dim); }
 .badge.s-none     { background: var(--s-none-bg);     color: var(--s-none-fg); }
 .badge.s-wishlist { background: var(--s-wishlist-bg); color: var(--s-wishlist-fg); }
+.badge.s-ordered  { background: var(--s-ordered-bg);  color: var(--s-ordered-fg); }
 .badge.s-sealed   { background: var(--s-sealed-bg);   color: var(--s-sealed-fg); }
 .badge.s-wip      { background: var(--s-wip-bg);      color: var(--s-wip-fg); }
 .badge.s-done     { background: var(--s-done-bg);     color: var(--s-done-fg); }

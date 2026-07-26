@@ -9,8 +9,11 @@ product line is a row in the `collections` table grouped into a *family*:
 | Tamashii Nations | METAL BUILD | tamashiiweb.com |
 
 Adding a new line (e.g. 超合金, S.H.Figuarts) = inserting a collection row with
-a scraper type + brand slug; no code change. You mark each item as owned, wanted,
-building, or finished.
+a scraper type + brand slug; no code change.
+
+You mark each item with one status: 未拥有 → 想要 → **未到货** (paid for, not
+delivered) → 未拆 → 在做 → 已完成. 已拥有 counts only what's in hand, so
+未到货 is tracked and surfaced separately rather than folded into it.
 
 Single Go binary + embedded SPA + SQLite + photo store. Built for NAS deployment
 behind Cloudflare Tunnel.

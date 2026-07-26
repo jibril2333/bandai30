@@ -5,20 +5,28 @@ const $ = id => document.getElementById(id);
 // Status vocabulary differs by collection type:
 //  - kit:      assemble-it-yourself model → tracks build progress
 //  - finished: pre-built toy (Tamashii etc.) → no buildステップ, just sealed/opened
+// "ordered" sits between 想要 and 未拆: paid for, not in hand yet. It is
+// deliberately NOT counted as 已拥有 anywhere — you can't build what hasn't
+// arrived — but it does count as "marked", so it shows up under 我的收藏.
 const STATUS_SETS = {
   kit: [
     { key: 'all', label: '全部' }, { key: 'none', label: '未拥有' }, { key: 'wishlist', label: '想要' },
+    { key: 'ordered', label: '未到货' },
     { key: 'sealed', label: '未拆' }, { key: 'wip', label: '在做' }, { key: 'done', label: '已完成' },
   ],
   finished: [
     { key: 'all', label: '全部' }, { key: 'none', label: '未拥有' }, { key: 'wishlist', label: '想要' },
+    { key: 'ordered', label: '未到货' },
     { key: 'sealed', label: '未拆' }, { key: 'done', label: '已开封' },
   ],
 };
 const STATUS_LABELS = {
-  kit:      { none: '未拥有', wishlist: '想要', sealed: '未拆', wip: '在做', done: '已完成' },
-  finished: { none: '未拥有', wishlist: '想要', sealed: '未拆', wip: '在做', done: '已开封' },
+  kit:      { none: '未拥有', wishlist: '想要', ordered: '未到货', sealed: '未拆', wip: '在做', done: '已完成' },
+  finished: { none: '未拥有', wishlist: '想要', ordered: '未到货', sealed: '未拆', wip: '在做', done: '已开封' },
 };
+// In hand. Ordered is excluded on purpose: 已拥有 counts what you can pick up
+// off the shelf, and folding pre-orders in would inflate it.
+const isOwned = s => s === 'sealed' || s === 'wip' || s === 'done';
 const statusSet = type => STATUS_SETS[type] || STATUS_SETS.kit;
 const statusLabel = (key, type) => (STATUS_LABELS[type] || STATUS_LABELS.kit)[key] || key;
 
@@ -193,14 +201,16 @@ async function renderLanding() {
   state.items = items;
   state.col = null;
 
-  const owned = items.filter(m => m.status === 'sealed' || m.status === 'wip' || m.status === 'done');
+  const owned = items.filter(m => isOwned(m.status));
   const wish = items.filter(m => m.status === 'wishlist');
+  const onWay = items.filter(m => m.status === 'ordered');
   const spent = owned.reduce((n, m) => n + parsePrice(m.price), 0);
   let total = 0;
   for (const c of state.collections) total += (state.stats[c.code] || {}).total || 0;
 
   const today = new Date().toISOString().slice(0, 10);
-  const upcoming = wish.filter(m => m.releaseDate && m.releaseDate > today)
+  // Ordered items belong here too — they are the ones genuinely on the way.
+  const upcoming = wish.concat(onWay).filter(m => m.releaseDate && m.releaseDate > today)
     .sort((a, b) => (a.releaseDate || '').localeCompare(b.releaseDate || ''));
 
   const sections = groupByFamily(state.collections).map(g => {
@@ -213,7 +223,7 @@ async function renderLanding() {
       <a href="#/${c.slug}" class="series-card" style="--accent:${c.color}">
         <div class="code">${c.code}</div>
         <div class="tagline">${escapeHtml(c.name)}${c.tagline ? ' · ' + escapeHtml(c.tagline) : ''}</div>
-        <div class="row"><span>共 <b>${tot}</b></span><span>已收 <b>${own}</b></span>${st.wishlist ? `<span>想要 <b>${st.wishlist}</b></span>` : ''}</div>
+        <div class="row"><span>共 <b>${tot}</b></span><span>已收 <b>${own}</b></span>${st.ordered ? `<span>未到货 <b>${st.ordered}</b></span>` : ''}${st.wishlist ? `<span>想要 <b>${st.wishlist}</b></span>` : ''}</div>
         <div class="progress"><div class="bar" style="width:${pct}%"></div></div>
       </a>`;
     }).join('');
@@ -222,7 +232,7 @@ async function renderLanding() {
 
   const upcomingHTML = upcoming.length ? `
     <div class="dash-sec">
-      <div class="dash-sec-h">想要 · 即将发售 <span>${upcoming.length}</span></div>
+      <div class="dash-sec-h">即将发售 · 想要与未到货 <span>${upcoming.length}</span></div>
       <div class="upcoming-row">
         ${upcoming.slice(0, 12).map(m => `
           <div class="upcoming-card" data-id="${escapeAttr(m.id)}">
@@ -238,9 +248,12 @@ async function renderLanding() {
       <h1>我的收藏库</h1>
       ${refreshBtnHTML('')}
     </div>
-    <div class="dash-metrics">
+    <!-- column count is set from the tile count: the 未到货 tile only appears
+         when something is on its way, and auto-fit would wrap it to 4+1. -->
+    <div class="dash-metrics" style="--cols:${onWay.length ? 5 : 4}">
       <div class="metric"><div class="mv">${total}</div><div class="ml">总收录</div></div>
       <a href="#/mine" class="metric"><div class="mv ok">${owned.length}</div><div class="ml">已拥有 ›</div></a>
+      ${onWay.length ? `<a href="#/mine" class="metric"><div class="mv way">${onWay.length}</div><div class="ml">未到货 ›</div></a>` : ''}
       <a href="#/mine" class="metric"><div class="mv want">${wish.length}</div><div class="ml">想要 ›</div></a>
       <div class="metric"><div class="mv">${spent ? fmtPrice(spent) : '¥0'}</div><div class="ml">已投入</div></div>
     </div>
@@ -268,8 +281,9 @@ async function renderMine() {
   state.items = items;        // so openView can find them
   state.col = null;
 
-  const owned = items.filter(m => m.status === 'sealed' || m.status === 'wip' || m.status === 'done');
+  const owned = items.filter(m => isOwned(m.status));
   const wish = items.filter(m => m.status === 'wishlist');
+  const onWay = items.filter(m => m.status === 'ordered');
   const spent = owned.reduce((n, m) => n + parsePrice(m.price), 0);
   const today = new Date().toISOString().slice(0, 10);
 
@@ -277,7 +291,7 @@ async function renderMine() {
   const order = state.collections.map(c => c.code);
   const byColl = {};
   for (const m of items) (byColl[m.series] = byColl[m.series] || []).push(m);
-  const rank = { done: 0, wip: 1, sealed: 2, wishlist: 3, none: 4 };
+  const rank = { done: 0, wip: 1, sealed: 2, ordered: 3, wishlist: 4, none: 5 };
   const sections = order.filter(code => byColl[code]).map(code => {
     const col = byCode(code) || { code, type: 'kit', color: '#e8467a' };
     const list = byColl[code].slice().sort((a, b) => (rank[a.status] - rank[b.status]) || (b.releaseDate || '').localeCompare(a.releaseDate || ''));
@@ -291,6 +305,7 @@ async function renderMine() {
     <div class="head"><h1 style="color:var(--primary)">★ 我的收藏</h1></div>
     <div class="mine-stats">
       <div class="stat"><div class="n">${owned.length}</div><div class="l">已拥有</div></div>
+      ${onWay.length ? `<div class="stat"><div class="n way">${onWay.length}</div><div class="l">未到货</div></div>` : ''}
       <div class="stat"><div class="n">${wish.length}</div><div class="l">想要</div></div>
       <div class="stat"><div class="n">¥${spent.toLocaleString()}</div><div class="l">估算投入</div></div>
     </div>
@@ -314,7 +329,7 @@ async function loadCollection(code) {
 }
 
 function statusCounts() {
-  const c = { all: state.items.length, none: 0, wishlist: 0, sealed: 0, wip: 0, done: 0 };
+  const c = { all: state.items.length, none: 0, wishlist: 0, ordered: 0, sealed: 0, wip: 0, done: 0 };
   for (const m of state.items) c[m.status] = (c[m.status] || 0) + 1;
   return c;
 }
@@ -324,7 +339,7 @@ function renderCollectionPage() {
   document.documentElement.style.setProperty('--primary', col.color);
   document.title = `${col.code} · Bandai 收藏`;
   const counts = statusCounts();
-  const owned = counts.sealed + counts.wip + counts.done;
+  const owned = counts.sealed + counts.wip + counts.done;   // in hand; see isOwned
 
   // category chip data (few categories → chips, not a dropdown)
   const catCounts = {};
@@ -713,8 +728,8 @@ function showSave(text, color) {
 // ---------- modal ----------
 // Longer labels for the edit form's status dropdown, per collection type.
 const STATUS_OPT_LABELS = {
-  kit:      { none: '未拥有', wishlist: '想要 (Wishlist)', sealed: '已购 · 未拆', wip: '已购 · 在做', done: '已购 · 已完成' },
-  finished: { none: '未拥有', wishlist: '想要 (Wishlist)', sealed: '已购 · 未拆', done: '已购 · 已开封' },
+  kit:      { none: '未拥有', wishlist: '想要 (Wishlist)', ordered: '已购 · 未到货', sealed: '已购 · 未拆', wip: '已购 · 在做', done: '已购 · 已完成' },
+  finished: { none: '未拥有', wishlist: '想要 (Wishlist)', ordered: '已购 · 未到货', sealed: '已购 · 未拆', done: '已购 · 已开封' },
 };
 const colType = code => { const c = byCode(code); return c ? c.type : 'kit'; };
 

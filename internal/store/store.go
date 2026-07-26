@@ -220,6 +220,7 @@ type StatusCounts struct {
 	Total    int `json:"total"`
 	None     int `json:"none"`
 	Wishlist int `json:"wishlist"`
+	Ordered  int `json:"ordered"` // bought, not delivered yet
 	Sealed   int `json:"sealed"`
 	WIP      int `json:"wip"`
 	Done     int `json:"done"`
@@ -249,6 +250,8 @@ func (s *Store) SeriesCounts(ctx context.Context) (map[string]*StatusCounts, err
 			c.None += n
 		case "wishlist":
 			c.Wishlist += n
+		case "ordered":
+			c.Ordered += n
 		case "sealed":
 			c.Sealed += n
 		case "wip":
