@@ -25,7 +25,7 @@ import (
 )
 
 func main() {
-	addr := flag.String("addr", envOrDefault("BANDAI30_ADDR", "0.0.0.0:8080"), "listen address")
+	addr := flag.String("addr", envOrDefault("BANDAI30_ADDR", "0.0.0.0:3010"), "listen address")
 	dataDir := flag.String("data", envOrDefault("BANDAI30_DATA", "./data"), "data directory (holds db + photos)")
 	seedFrom := flag.String("seed-from", "", "path to a legacy data.json to import on startup (only runs if items table is empty)")
 	importOnly := flag.Bool("import-only", false, "exit after seed import instead of serving")

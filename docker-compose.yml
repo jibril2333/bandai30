@@ -27,7 +27,7 @@ services:
       BANDAI30_ADDR: "0.0.0.0:3010"
       BANDAI30_DATA: "/data"
       # Auth is enforced at the network layer (Cloudflare Access in front of
-      # the tunnel), not by the app. Mirrors the old LaunchAgent's -no-auth.
+      # the tunnel), not by the app. Equivalent to passing -no-auth.
       BANDAI30_NO_AUTH: "1"
       # Weekly refresh + ntfy push. Measured from the last run recorded in the
       # DB, not from container start, so redeploys don't keep resetting the
