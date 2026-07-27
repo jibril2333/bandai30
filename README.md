@@ -20,8 +20,13 @@ behind Cloudflare Tunnel.
 
 ## Scrapers
 
-- **bandai-hobby**: paginates `global.bandai-hobby.net/en-us/brand/<slug>/`,
-  parses the server-rendered product cards.
+- **bandai-hobby**: paginates `bandai-hobby.net/brand/<slug>/`, parses the
+  server-rendered product cards. The **Japanese** site, not the `en-us` one:
+  its prices are tax-inclusive (the English site quotes them ex-tax, e.g. 800
+  vs 880 for the same part) and it lists items the English site omits. Product
+  names are therefore Japanese, matching Tamashii and the JP storefronts.
+  Card images are short-lived signed CloudFront URLs — a listing page held for
+  more than a few minutes yields 403s on the image fetch.
 - **tamashii**: hits the JSON search API
   `tamashiiweb.com/api/site-item/search_item.php?brandCode[]=<slug>&per_page=100&current_page=N&area=japan`
   (paginated). The full list of brand slugs is at `…/search_attr.php`.

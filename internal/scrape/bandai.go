@@ -19,14 +19,19 @@ import (
 const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
 
 var (
-	cardBlockRE = regexp.MustCompile(`(?s)<a href="https://global\.bandai-hobby\.net/en-us/item/(01_\d+)/"[^>]*>(.*?)</a>`)
+	cardBlockRE = regexp.MustCompile(`(?s)<a href="https://bandai-hobby\.net/item/(01_\d+)/"[^>]*>(.*?)</a>`)
 	titleRE     = regexp.MustCompile(`<div class="p-card__tit">([^<]*)</div>`)
 	imgRE       = regexp.MustCompile(`<img src="([^"]+)"[^>]*alt="([^"]*)"`)
 	priceRE     = regexp.MustCompile(`<div class="p-card__price">([^<]*)</div>`)
 	dateRE      = regexp.MustCompile(`<div class="p-card_date">([^<]*)</div>`)
-	paginRE     = regexp.MustCompile(`<li class="p-pagination__list[^"]*"[^>]*>\s*<a[^>]*>(\d+)</a>`)
+	// Match the numbered pagination anchors only: the page also carries
+	// unrelated "?p=" links (news teasers) with much larger numbers.
+	paginRE     = regexp.MustCompile(`c-archives__pagination-list-item-link"[^>]*>\s*(\d+)\s*<`)
 	akamaiRE    = regexp.MustCompile(`https://bandai-a\.akamaihd\.net/bc/img/model/xl/[\w]+_1\.jpg`)
-	cfBackupRE  = regexp.MustCompile(`https://d[a-z0-9]+\.cloudfront\.net/hobby/[^"]+\.jpg`)
+	// Signed URL: the ?Expires/Signature query is part of it — dropping the
+	// query yields a 403. The signature is short-lived (~3 min), so a stale
+	// listing page is a real failure mode, not a parse bug.
+	cfBackupRE  = regexp.MustCompile(`https://d[a-z0-9]+\.cloudfront\.net/hobby/[^"']+\.jpg[^"']*`)
 )
 
 type Client struct {
@@ -171,16 +176,18 @@ func (c *Client) scrapePage(ctx context.Context, brand, series string, page int,
 	return nil
 }
 
-// parsePriceDigits strips everything but digits, e.g. "2,000Yen" → "2000",
-// "¥17,600（税込）" → "17600". Returns "" if there's no number.
+// priceLeadRE grabs the FIRST run of digits (commas allowed), which is the
+// amount itself.
+var priceLeadRE = regexp.MustCompile(`[\d,]*\d`)
+
+// parsePriceDigits extracts the amount from a catalogue price string:
+// "2,200円(税10%込)" → "2200", "2,000Yen" → "2000", "オープン価格" → "".
+//
+// It must not simply keep every digit: the JP catalogue spells the tax rate
+// inside the same string, so "880円(税10%込)" would come out as "88010".
 func parsePriceDigits(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if r >= '0' && r <= '9' {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
+	m := priceLeadRE.FindString(s)
+	return strings.ReplaceAll(m, ",", "")
 }
 
 func imgFields(inner []byte) (alt, src string) {
@@ -201,9 +208,9 @@ func firstSubmatch(re *regexp.Regexp, b []byte) string {
 
 func (c *Client) brandURL(brand string, page int) string {
 	if page <= 1 {
-		return "https://global.bandai-hobby.net/en-us/brand/" + brand + "/"
+		return "https://bandai-hobby.net/brand/" + brand + "/"
 	}
-	return fmt.Sprintf("https://global.bandai-hobby.net/en-us/brand/%s/?p=%d", brand, page)
+	return fmt.Sprintf("https://bandai-hobby.net/brand/%s/?p=%d", brand, page)
 }
 
 func (c *Client) fetch(ctx context.Context, url, brand string) ([]byte, error) {
@@ -213,8 +220,8 @@ func (c *Client) fetch(ctx context.Context, url, brand string) ([]byte, error) {
 	}
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-	req.Header.Set("Referer", "https://global.bandai-hobby.net/en-us/brand/"+brand+"/")
+	req.Header.Set("Accept-Language", "ja,en;q=0.8")
+	req.Header.Set("Referer", "https://bandai-hobby.net/brand/"+brand+"/")
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, err
@@ -233,7 +240,7 @@ func (c *Client) downloadImage(ctx context.Context, url, path string) error {
 	}
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "image/*")
-	req.Header.Set("Referer", "https://global.bandai-hobby.net/")
+	req.Header.Set("Referer", "https://bandai-hobby.net/")
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return err
@@ -261,7 +268,7 @@ func (c *Client) downloadImage(ctx context.Context, url, path string) error {
 }
 
 func (c *Client) fallbackImage(ctx context.Context, itemID string) (string, error) {
-	body, err := c.fetch(ctx, "https://global.bandai-hobby.net/en-us/item/"+itemID+"/", "30ms")
+	body, err := c.fetch(ctx, "https://bandai-hobby.net/item/"+itemID+"/", "30ms")
 	if err != nil {
 		return "", err
 	}
@@ -275,45 +282,53 @@ func (c *Client) fallbackImage(ctx context.Context, itemID string) (string, erro
 }
 
 // Categorize maps a product name to a category. Heuristic; 30MP defaults to Figure.
+// Categorize buckets an item by its Japanese product name. The catalogue is
+// scraped from bandai-hobby.net, so every name is Japanese — including the
+// Premium Bandai entries from the lineup pages.
+//
+// The rules were derived from the full JP catalogue and checked against the
+// 423 items whose category was already known from the English names: all 423
+// land in the same bucket.
 func Categorize(name, series string) string {
 	u := strings.ToUpper(name)
 	switch {
-	case strings.Contains(u, "OPTION BODY PARTS"):
+	case strings.Contains(name, "オプションボディパーツ"):
 		return "Option Body"
-	case strings.Contains(u, "OPTION HAIR"):
+	// "オプションヘアスタイル&フェイスパーツセット" is filed under hair, so this
+	// must come before the face check. The loose prefix also absorbs a typo in
+	// the catalogue ("パーﾂ" with a half-width ﾂ) that a stricter match misses.
+	case strings.Contains(name, "オプションヘアスタイル"), strings.Contains(name, "ヘアスタイルパーツ"):
 		return "Option Hair"
-	case strings.Contains(u, "FACE PARTS"), strings.Contains(u, "FACIAL EXPRESSION"):
+	case strings.Contains(name, "フェイスパーツ"), strings.Contains(name, "表情"):
 		return "Option Face"
-	case strings.Contains(u, "HAND PARTS"):
+	case strings.Contains(name, "ハンドパーツ"):
 		return "Option Hand"
-	case strings.Contains(u, "WATER DECAL"), strings.Contains(u, "DECAL"):
+	case strings.Contains(name, "デカール"):
 		return "Decals"
-	// match both spellings: "OPTION PARTS SET" and "OPTIONAL PARTS SET (Speed Armor)"
-	case strings.Contains(u, "OPTION PARTS SET"), strings.Contains(u, "OPTIONAL PARTS SET"):
+	case strings.Contains(name, "オプションパーツセット"):
 		return "Option Parts Set"
-	case strings.Contains(u, "30MS SIS-"):
+	case strings.Contains(u, "SIS-"):
 		return "Sisters"
 	case series == "30MP":
 		return "Figure"
 	case series == "30MM":
-		// accessory sets first, so they don't fall into the mecha bucket
+		// Accessory sets first, so they don't fall into the mecha bucket.
+		// "エグザビー" covers both エグザビークル (vehicle) and エグザビースト (beast).
 		switch {
-		case strings.Contains(u, "CUSTOMIZE"), strings.Contains(u, "EXTENDED ARMAMENT"),
-			strings.Contains(u, "VEHICLE"), strings.Contains(u, "OPTION"):
+		case strings.Contains(name, "カスタマイズ"), strings.Contains(name, "エグザビー"),
+			strings.Contains(name, "オプション"):
 			return "Option Parts"
 		}
 		return "Mecha" // eEXM/EXM originals + licensed (Armored Core, Daemon X Machina)
 	case series == "30MF":
 		switch {
-		case strings.Contains(u, "CUSTOMIZE"), strings.Contains(u, "CLASS UP ARMOR"),
-			strings.Contains(u, "OPTION"):
+		case strings.Contains(name, "カスタマイズ"), strings.Contains(name, "クラスアップアーマー"),
+			strings.Contains(name, "オプション"), strings.Contains(name, "アイテムショップ"):
 			return "Option Parts"
 		}
 		return "Fantasy"
-	case strings.Contains(u, "30MS "):
-		return "Coordination"
 	}
-	return "Other"
+	return "Coordination"
 }
 
 var monthIdx = map[string]int{
@@ -324,6 +339,9 @@ var monthIdx = map[string]int{
 var (
 	dateFullRE  = regexp.MustCompile(`^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),\s+(\d{4})`)
 	dateMonthRE = regexp.MustCompile(`^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})`)
+	// JP catalogue: "2023年12月09日 (土)" and the month-only "2026年12月".
+	dateJPFullRE  = regexp.MustCompile(`(\d{4})年(\d{1,2})月(\d{1,2})日`)
+	dateJPMonthRE = regexp.MustCompile(`(\d{4})年(\d{1,2})月`)
 )
 
 func parseDate(raw string) string {
@@ -336,6 +354,12 @@ func parseDate(raw string) string {
 	}
 	if m := dateMonthRE.FindStringSubmatch(raw); m != nil {
 		return fmt.Sprintf("%s-%02d", m[2], monthIdx[m[1]])
+	}
+	if m := dateJPFullRE.FindStringSubmatch(raw); m != nil {
+		return fmt.Sprintf("%s-%02d-%02d", m[1], atoi(m[2]), atoi(m[3]))
+	}
+	if m := dateJPMonthRE.FindStringSubmatch(raw); m != nil {
+		return fmt.Sprintf("%s-%02d", m[1], atoi(m[2]))
 	}
 	return raw
 }

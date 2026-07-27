@@ -13,7 +13,7 @@ import (
 
 // The brand listing only shows in-production items, so discontinued regular
 // items silently drop off it even though their detail page still exists.
-// FetchItem pulls a single item straight from its global.bandai-hobby.net
+// FetchItem pulls a single item straight from its bandai-hobby.net
 // detail page so such gaps can be filled in by item id.
 
 var (
@@ -32,7 +32,7 @@ func detailField(body []byte, label string) string {
 // FetchItem scrapes one item's detail page and upserts it under series.
 func (c *Client) FetchItem(ctx context.Context, itemID, series string) (*Report, error) {
 	rep := &Report{Brand: "item:" + itemID}
-	body, err := c.fetch(ctx, "https://global.bandai-hobby.net/en-us/item/"+itemID+"/", "30ms")
+	body, err := c.fetch(ctx, "https://bandai-hobby.net/item/"+itemID+"/", "30ms")
 	if err != nil {
 		return rep, err
 	}
@@ -40,7 +40,7 @@ func (c *Client) FetchItem(ctx context.Context, itemID, series string) (*Report,
 	if m := titleTagRE.FindSubmatch(body); m != nil {
 		rawTitle = string(m[1])
 	}
-	// title is "<name>｜BANDAI HOBBY SITE"
+	// title is "<name>｜バンダイ ホビーサイト"
 	name := strings.TrimSpace(strings.Split(rawTitle, "｜")[0])
 	if name == "" {
 		return rep, fmt.Errorf("no product name on detail page for %s", itemID)
@@ -55,8 +55,8 @@ func (c *Client) FetchItem(ctx context.Context, itemID, series string) (*Report,
 		Series:      series,
 		Category:    Categorize(name, series),
 		Name:        name,
-		Price:       parsePriceDigits(detailField(body, "Price")),
-		ReleaseDate: parseDate(detailField(body, "Launch date")),
+		Price:       parsePriceDigits(detailField(body, "価格")),
+		ReleaseDate: parseDate(detailField(body, "発売日")),
 		Status:      "none",
 	}
 	if ex, _ := c.Store.GetItem(ctx, itemID); ex != nil {

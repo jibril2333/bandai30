@@ -736,7 +736,7 @@ function officialUrl(item) {
   const c = byCode(item.series);
   if (!c || !item.id) return '';
   if (c.scraper === 'bandai-hobby' && /^01_\d+$/.test(item.id))
-    return `https://global.bandai-hobby.net/en-us/item/${item.id}/`;
+    return `https://bandai-hobby.net/item/${item.id}/`;
   if (c.scraper === 'tamashii' && /^tw-\d+$/.test(item.id))
     return `https://tamashiiweb.com/item/${item.id.slice(3)}/`;
   return '';

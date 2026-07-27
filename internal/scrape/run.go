@@ -146,8 +146,21 @@ func (c *Client) run(ctx context.Context, scope, trigger string) ([]string, erro
 		}
 		fresh = append(fresh, got...)
 
+		// rep.Failures holds per-item problems — a photo that wouldn't
+		// download, an upsert that failed. They must reach the UI: without
+		// this the run reports "no failures" while items silently end up
+		// with no picture.
+		var failed []string
+		for _, f := range rep.Failures {
+			failed = append(failed, col.Code+": "+f)
+		}
+		if len(failed) > 0 {
+			log.Printf("%s %s: %d item-level failure(s), first: %s", trigger, col.Code, len(failed), failed[0])
+		}
+
 		c.mu.Lock()
 		c.state.NewItems = append(c.state.NewItems, got...)
+		c.state.Failures = append(c.state.Failures, failed...)
 		c.state.Completed++
 		c.mu.Unlock()
 
