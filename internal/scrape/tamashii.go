@@ -123,11 +123,7 @@ func (c *Client) scrapeTamashii(ctx context.Context, brandCode, series string) (
 		}
 		existing, _ := c.Store.GetItem(ctx, r.id)
 		if existing != nil {
-			it.NameZh = existing.NameZh
-			it.Notes = existing.Notes
-			it.Status = existing.Status
 			it.PhotoURL = existing.PhotoURL
-			it.CreatedAt = existing.CreatedAt
 		}
 
 		if it.PhotoURL == "" {
@@ -154,7 +150,7 @@ func (c *Client) scrapeTamashii(ctx context.Context, brandCode, series string) (
 			}
 		}
 
-		if err := c.Store.UpsertItem(ctx, &it); err != nil {
+		if err := c.Store.UpsertCatalog(ctx, &it); err != nil {
 			rep.Failures = append(rep.Failures, fmt.Sprintf("%s upsert: %v", r.id, err))
 			continue
 		}

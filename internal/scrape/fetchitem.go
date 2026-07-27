@@ -60,11 +60,7 @@ func (c *Client) FetchItem(ctx context.Context, itemID, series string) (*Report,
 		Status:      "none",
 	}
 	if ex, _ := c.Store.GetItem(ctx, itemID); ex != nil {
-		it.NameZh = ex.NameZh
-		it.Notes = ex.Notes
-		it.Status = ex.Status
 		it.PhotoURL = ex.PhotoURL
-		it.CreatedAt = ex.CreatedAt
 	}
 
 	if it.PhotoURL == "" {
@@ -82,7 +78,7 @@ func (c *Client) FetchItem(ctx context.Context, itemID, series string) (*Report,
 		}
 	}
 
-	if err := c.Store.UpsertItem(ctx, &it); err != nil {
+	if err := c.Store.UpsertCatalog(ctx, &it); err != nil {
 		return rep, err
 	}
 	rep.Upserted++

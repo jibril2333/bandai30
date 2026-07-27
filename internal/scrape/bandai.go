@@ -122,7 +122,9 @@ func (c *Client) scrapePage(ctx context.Context, brand, series string, page int,
 
 		rep.ItemsFound++
 
-		// Preserve user edits: nameZh/notes/status untouched on update.
+		// existing tells us whether this is a brand-new item and whether a
+		// photo is already on file. User fields need no copying — see
+		// store.UpsertCatalog, which never writes them.
 		existing, _ := c.Store.GetItem(ctx, itemID)
 		it := store.Item{
 			ID:          itemID,
@@ -134,11 +136,7 @@ func (c *Client) scrapePage(ctx context.Context, brand, series string, page int,
 			Status:      "none",
 		}
 		if existing != nil {
-			it.NameZh = existing.NameZh
-			it.Notes = existing.Notes
-			it.Status = existing.Status
 			it.PhotoURL = existing.PhotoURL
-			it.CreatedAt = existing.CreatedAt
 		}
 
 		// Download photo if we don't already have one.
@@ -166,7 +164,7 @@ func (c *Client) scrapePage(ctx context.Context, brand, series string, page int,
 			}
 		}
 
-		if err := c.Store.UpsertItem(ctx, &it); err != nil {
+		if err := c.Store.UpsertCatalog(ctx, &it); err != nil {
 			rep.Failures = append(rep.Failures, fmt.Sprintf("%s upsert: %v", itemID, err))
 			continue
 		}

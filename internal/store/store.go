@@ -97,6 +97,9 @@ func (s *Store) Close() error { return s.DB.Close() }
 
 // --- Items ---
 
+// UpsertItem writes every column, user fields included. This is the path for
+// a deliberate edit: the edit form, a JSON import, a restore. Scrapers must
+// use UpsertCatalog instead.
 func (s *Store) UpsertItem(ctx context.Context, it *Item) error {
 	now := time.Now().Unix()
 	if it.CreatedAt == 0 {
@@ -115,9 +118,19 @@ func (s *Store) UpsertItem(ctx context.Context, it *Item) error {
 	return err
 }
 
-// UpsertItemPreservePhoto behaves like UpsertItem but never overwrites a non-empty existing photo_url
-// with an empty one (used by the scraper so manual uploads don't get clobbered).
-func (s *Store) UpsertItemPreservePhoto(ctx context.Context, it *Item) error {
+// UpsertCatalog writes the fields that belong to the official catalogue and
+// leaves everything the user owns alone. Every scraper goes through it.
+//
+// The guarantee lives here, in SQL, rather than in each scraper: name_zh,
+// notes and status are simply absent from the UPDATE list, so no caller can
+// blank them by forgetting to copy the old row first. Losing them would be
+// unrecoverable — they exist nowhere but this database.
+//
+// Official fields are only overwritten by a NON-EMPTY value. A listing that
+// momentarily omits a price (a rendering change, an "オープン価格" placeholder)
+// would otherwise wipe a good one. photo_url likewise sticks once set: it may
+// point at a photo the user uploaded.
+func (s *Store) UpsertCatalog(ctx context.Context, it *Item) error {
 	now := time.Now().Unix()
 	if it.CreatedAt == 0 {
 		it.CreatedAt = now
@@ -127,9 +140,12 @@ func (s *Store) UpsertItemPreservePhoto(ctx context.Context, it *Item) error {
 		INSERT INTO items(id, series, category, name, name_zh, release_date, price, status, notes, photo_url, created_at, updated_at)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET
-			series=excluded.series, category=excluded.category, name=excluded.name,
-			release_date=excluded.release_date, price=excluded.price,
-			photo_url=CASE WHEN excluded.photo_url != '' THEN excluded.photo_url ELSE items.photo_url END,
+			series=excluded.series,
+			category=excluded.category,
+			name=CASE WHEN excluded.name != '' THEN excluded.name ELSE items.name END,
+			release_date=CASE WHEN excluded.release_date != '' THEN excluded.release_date ELSE items.release_date END,
+			price=CASE WHEN excluded.price != '' THEN excluded.price ELSE items.price END,
+			photo_url=CASE WHEN items.photo_url != '' THEN items.photo_url ELSE excluded.photo_url END,
 			updated_at=excluded.updated_at`,
 		it.ID, it.Series, it.Category, it.Name, it.NameZh, it.ReleaseDate, it.Price, it.Status, it.Notes,
 		it.PhotoURL, it.CreatedAt, it.UpdatedAt)
