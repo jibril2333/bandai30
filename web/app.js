@@ -737,6 +737,9 @@ function officialUrl(item) {
   if (!c || !item.id) return '';
   if (c.scraper === 'bandai-hobby' && /^01_\d+$/.test(item.id))
     return `https://bandai-hobby.net/item/${item.id}/`;
+  // Premium Bandai exclusives are sold on the PB store, not the hobby site.
+  if (c.scraper === 'bandai-hobby' && /^pb-\d+$/.test(item.id))
+    return `https://p-bandai.jp/item/item-${item.id.slice(3)}/`;
   if (c.scraper === 'tamashii' && /^tw-\d+$/.test(item.id))
     return `https://tamashiiweb.com/item/${item.id.slice(3)}/`;
   return '';

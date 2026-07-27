@@ -19,7 +19,11 @@ import (
 const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
 
 var (
-	cardBlockRE = regexp.MustCompile(`(?s)<a href="https://bandai-hobby\.net/item/(01_\d+)/"[^>]*>(.*?)</a>`)
+	// Two kinds of card sit in the same listing: regular items link to the
+	// hobby site, Premium Bandai exclusives link out to the PB store. Both
+	// carry the same title/price/date/image markup, so capture either and
+	// derive the id from whichever group matched.
+	cardBlockRE = regexp.MustCompile(`(?s)<a href="https://(?:bandai-hobby\.net/item/(01_\d+)|p-bandai\.jp/item/item-(\d+))/"[^>]*>(.*?)</a>`)
 	titleRE     = regexp.MustCompile(`<div class="p-card__tit">([^<]*)</div>`)
 	imgRE       = regexp.MustCompile(`<img src="([^"]+)"[^>]*alt="([^"]*)"`)
 	priceRE     = regexp.MustCompile(`<div class="p-card__price">([^<]*)</div>`)
@@ -80,11 +84,6 @@ func (c *Client) scrapeBandaiHobby(ctx context.Context, brand, series string) (*
 			rep.Failures = append(rep.Failures, fmt.Sprintf("page %d: %v", p, err))
 		}
 	}
-	// Premium Bandai exclusives aren't on the brand listing — pick them up from
-	// the series lineup page, if one is known.
-	if u := lineupPBURL[brand]; u != "" {
-		c.scrapeLineupPB(ctx, u, series, rep)
-	}
 	return rep, nil
 }
 
@@ -112,7 +111,10 @@ func (c *Client) scrapePage(ctx context.Context, brand, series string, page int,
 
 	for _, blk := range cardBlockRE.FindAllSubmatch(body, -1) {
 		itemID := string(blk[1])
-		inner := blk[2]
+		if itemID == "" {
+			itemID = "pb-" + string(blk[2]) // Premium Bandai exclusive
+		}
+		inner := blk[3]
 		title := firstSubmatch(titleRE, inner)
 		_, imgURL := imgFields(inner)
 		price := parsePriceDigits(firstSubmatch(priceRE, inner))
@@ -206,11 +208,19 @@ func firstSubmatch(re *regexp.Regexp, b []byte) string {
 	return strings.TrimSpace(string(m[1]))
 }
 
+// brandURL carries a cache-busting parameter on purpose.
+//
+// The listing HTML is CDN-cached, but the card images are signed CloudFront
+// URLs valid for only a few minutes. A cached page therefore hands out
+// signatures that expired hours ago and every image fetch returns 403. Asking
+// for an uncached render costs ~60 requests a week and gets both fresh
+// signatures and newly listed items.
 func (c *Client) brandURL(brand string, page int) string {
+	bust := time.Now().UnixNano()
 	if page <= 1 {
-		return "https://bandai-hobby.net/brand/" + brand + "/"
+		return fmt.Sprintf("https://bandai-hobby.net/brand/%s/?_=%d", brand, bust)
 	}
-	return fmt.Sprintf("https://bandai-hobby.net/brand/%s/?p=%d", brand, page)
+	return fmt.Sprintf("https://bandai-hobby.net/brand/%s/?p=%d&_=%d", brand, page, bust)
 }
 
 func (c *Client) fetch(ctx context.Context, url, brand string) ([]byte, error) {
@@ -268,6 +278,11 @@ func (c *Client) downloadImage(ctx context.Context, url, path string) error {
 }
 
 func (c *Client) fallbackImage(ctx context.Context, itemID string) (string, error) {
+	// Premium Bandai items have no hobby-site detail page; the listing card is
+	// the only source for their image.
+	if strings.HasPrefix(itemID, "pb-") {
+		return "", fmt.Errorf("no hobby-site detail page for %s", itemID)
+	}
 	body, err := c.fetch(ctx, "https://bandai-hobby.net/item/"+itemID+"/", "30ms")
 	if err != nil {
 		return "", err
