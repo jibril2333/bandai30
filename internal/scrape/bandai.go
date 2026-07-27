@@ -61,7 +61,6 @@ func New(st *store.Store, photosDir string) *Client {
 type Report struct {
 	Brand      string   `json:"brand"`
 	ItemsFound int      `json:"itemsFound"`
-	Duplicates int      `json:"duplicates"` // re-sale/batch rows collapsed into a canonical item
 	Upserted   int      `json:"upserted"`
 	NewPhotos  int      `json:"newPhotos"`
 	NewItems   []string `json:"newItems,omitempty"` // titles of items not previously in the DB
