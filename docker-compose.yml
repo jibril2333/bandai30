@@ -33,7 +33,11 @@ services:
       # DB, not from container start, so redeploys don't keep resetting the
       # countdown. The ntfy topic is injected by the workflow from a repo
       # secret so it never lands in git.
+      # Two cadences: the cheap listing pass weekly, the detail-page pass
+      # monthly. Both are only DEFAULTS — the settings page stores the real
+      # values in the database, which survives this container being recreated.
       BANDAI30_SCRAPE_INTERVAL: "168h"
+      BANDAI30_FULL_INTERVAL: "720h"
       BANDAI30_NTFY_TOPIC: ${BANDAI30_NTFY_TOPIC:-}
       TZ: Asia/Tokyo
     volumes:

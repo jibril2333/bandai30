@@ -9,39 +9,40 @@ import (
 // change survives a redeploy — the container is recreated on every push, and
 // anything held only in the environment would revert to the compose default.
 type Settings struct {
-	// AutoInterval is a Go duration ("168h"). Empty disables the scheduler.
+	// AutoInterval is how often the cheap listing-only refresh runs, as a Go
+	// duration ("168h"). Empty disables it.
 	AutoInterval string `json:"autoInterval"`
-	// AutoMode is "incremental" or "full".
-	AutoMode string `json:"autoMode"`
+	// FullInterval is how often the detail-page pass runs. It is far more
+	// expensive, so it gets its own, usually much longer, schedule. Empty
+	// disables it. A full run also covers everything the incremental one does.
+	FullInterval string `json:"fullInterval"`
 }
 
 const (
 	keyAutoInterval = "auto_interval"
-	keyAutoMode     = "auto_mode"
+	keyFullInterval = "full_interval"
 )
 
 // GetSettings returns the stored settings, falling back to the supplied
 // defaults for anything never set (first boot reads them from the
 // environment, so an untouched install behaves exactly as before).
-func (s *Store) GetSettings(ctx context.Context, defInterval, defMode string) (Settings, error) {
-	out := Settings{AutoInterval: defInterval, AutoMode: defMode}
-	iv, err := s.GetMeta(ctx, keyAutoInterval)
-	if err != nil {
-		return out, err
-	}
-	if iv != "" {
-		out.AutoInterval = iv
-	}
-	// A stored "off" is a deliberate choice and must beat the default.
-	if iv == "off" {
-		out.AutoInterval = ""
-	}
-	md, err := s.GetMeta(ctx, keyAutoMode)
-	if err != nil {
-		return out, err
-	}
-	if md != "" {
-		out.AutoMode = md
+func (s *Store) GetSettings(ctx context.Context, defInterval, defFull string) (Settings, error) {
+	out := Settings{AutoInterval: defInterval, FullInterval: defFull}
+	for _, f := range []struct {
+		key string
+		dst *string
+	}{{keyAutoInterval, &out.AutoInterval}, {keyFullInterval, &out.FullInterval}} {
+		v, err := s.GetMeta(ctx, f.key)
+		if err != nil {
+			return out, err
+		}
+		// "off" is a deliberate choice and must beat the default; "" means
+		// never configured, so the default stands.
+		if v == "off" {
+			*f.dst = ""
+		} else if v != "" {
+			*f.dst = v
+		}
 	}
 	return out, nil
 }
@@ -49,21 +50,28 @@ func (s *Store) GetSettings(ctx context.Context, defInterval, defMode string) (S
 // SaveSettings persists both fields. An empty interval is stored as the
 // sentinel "off" so it is distinguishable from "never configured".
 func (s *Store) SaveSettings(ctx context.Context, in Settings) error {
-	iv := in.AutoInterval
-	if iv == "" {
-		iv = "off"
+	blank := func(v string) string {
+		if v == "" {
+			return "off"
+		}
+		return v
 	}
-	if err := s.SetMeta(ctx, keyAutoInterval, iv); err != nil {
+	if err := s.SetMeta(ctx, keyAutoInterval, blank(in.AutoInterval)); err != nil {
 		return err
 	}
-	return s.SetMeta(ctx, keyAutoMode, in.AutoMode)
+	return s.SetMeta(ctx, keyFullInterval, blank(in.FullInterval))
 }
 
-// Interval parses AutoInterval. Zero means "no automatic refresh".
-func (st Settings) Interval() time.Duration {
-	d, err := time.ParseDuration(st.AutoInterval)
+func parseInterval(v string) time.Duration {
+	d, err := time.ParseDuration(v)
 	if err != nil || d < time.Minute {
 		return 0
 	}
 	return d
 }
+
+// Interval is the incremental cadence. Zero means "never".
+func (st Settings) Interval() time.Duration { return parseInterval(st.AutoInterval) }
+
+// Full is the detail-page cadence. Zero means "never".
+func (st Settings) Full() time.Duration { return parseInterval(st.FullInterval) }

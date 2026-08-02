@@ -78,8 +78,11 @@ func (c *Client) scrapeBandaiHobby(ctx context.Context, brand, series string) (*
 	if err := os.MkdirAll(c.PhotosDir, 0o755); err != nil {
 		return nil, err
 	}
+	// Computed once per collection: hashing the photo dir per item would be
+	// wasteful, and a placeholder that appears mid-run can wait for the next.
+	shared := c.sharedCovers()
 	for p := 1; p <= maxPage; p++ {
-		if err := c.scrapePage(ctx, brand, series, p, rep); err != nil {
+		if err := c.scrapePage(ctx, brand, series, p, rep, shared); err != nil {
 			rep.Failures = append(rep.Failures, fmt.Sprintf("page %d: %v", p, err))
 		}
 	}
@@ -102,7 +105,7 @@ func (c *Client) discoverPages(ctx context.Context, brand string) (int, error) {
 	return max, nil
 }
 
-func (c *Client) scrapePage(ctx context.Context, brand, series string, page int, rep *Report) error {
+func (c *Client) scrapePage(ctx context.Context, brand, series string, page int, rep *Report, shared map[string]bool) error {
 	body, err := c.fetch(ctx, c.brandURL(brand, page), brand)
 	if err != nil {
 		return err
@@ -137,11 +140,19 @@ func (c *Client) scrapePage(ctx context.Context, brand, series string, page int,
 		if existing != nil {
 			it.PhotoURL = existing.PhotoURL
 		}
+		// A cover shared with other items is a brand-logo placeholder, not a
+		// photo of this product: forget it so the code below fetches again,
+		// which picks up the real shot as soon as Bandai publishes one.
+		if it.PhotoURL != "" && c.coverIsPlaceholder(shared, itemID) {
+			it.PhotoURL = ""
+		}
 
 		// Download photo if we don't already have one.
 		if it.PhotoURL == "" {
 			photoPath := filepath.Join(c.PhotosDir, itemID+".jpg")
-			if _, err := os.Stat(photoPath); err == nil {
+			// Reuse a file already on disk — unless it is the placeholder we
+			// just rejected, in which case it must be overwritten.
+			if _, err := os.Stat(photoPath); err == nil && !c.coverIsPlaceholder(shared, itemID) {
 				it.PhotoURL = "/photos/" + itemID + ".jpg"
 			} else if imgURL != "" {
 				if err := c.downloadImage(ctx, imgURL, photoPath); err != nil {

@@ -81,11 +81,19 @@ come off the listing on every run, so a price change or a renamed product is
 picked up without a full pass. Full mode exists for the gallery, which only the
 detail page carries.
 
-The settings page (⚙ in the header) chooses the interval and which mode the
-automatic run uses, and both are stored in the database — the container is
-recreated on every deploy, so anything kept only in the environment would
-revert. `BANDAI30_SCRAPE_INTERVAL` / `BANDAI30_SCRAPE_MODE` now only seed the
-defaults for a fresh install.
+Each mode has its OWN schedule, set on the settings page (⚙ in the header):
+weekly listings and monthly detail pages is a sensible pairing. Whichever falls
+due first runs; a full pass covers the incremental ground too, so it resets
+both clocks. Both intervals live in the database — the container is recreated
+on every deploy, so anything kept only in the environment would revert.
+`BANDAI30_SCRAPE_INTERVAL` / `BANDAI30_FULL_INTERVAL` only seed the defaults
+for a fresh install.
+
+The full pass also repairs **placeholder covers**. Bandai serves a brand logo
+for products announced before their photos are shot; since a cover is only
+fetched when an item has none, that logo used to stick forever. A cover that is
+byte-identical across several items cannot be a photo of any one of them, so it
+is treated as missing and re-fetched until the real shot appears.
 
 ### Refreshing by hand
 

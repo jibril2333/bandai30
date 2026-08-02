@@ -2,6 +2,8 @@ package scrape
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -127,4 +129,93 @@ func (c *Client) FetchGallery(ctx context.Context, itemID string) (int, error) {
 		return downloaded, err
 	}
 	return downloaded, nil
+}
+
+// --- placeholder covers ---
+//
+// Bandai serves a brand logo ("30 MINUTES PREFERENCE" and friends) for products
+// announced before their photos are shot. We download that like any other
+// picture, and because a cover is only fetched when the item has none, it then
+// sticks forever — 30MP アリス（メイド）kept a logo long after its real photos
+// went up.
+//
+// Rather than hard-coding hashes (there is one per brand, and they change),
+// spot them by their defining property: a placeholder is byte-identical across
+// SEVERAL items, whereas a real product shot belongs to exactly one. Any cover
+// whose content is shared is treated as "no photo yet" and re-fetched on the
+// next run, until the real thing replaces it.
+
+func fileHash(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// sharedCovers returns the hashes of cover images used by more than one item.
+func (c *Client) sharedCovers() map[string]bool {
+	entries, err := os.ReadDir(c.PhotosDir)
+	if err != nil {
+		return nil
+	}
+	count := map[string]int{}
+	for _, e := range entries {
+		name := e.Name()
+		// Covers only. Gallery shots legitimately repeat their own cover, and
+		// counting them would make every item look shared.
+		if isGalleryShot(name) {
+			continue
+		}
+		h, err := fileHash(filepath.Join(c.PhotosDir, name))
+		if err != nil {
+			continue
+		}
+		count[h]++
+	}
+	out := map[string]bool{}
+	for h, n := range count {
+		if n > 1 {
+			out[h] = true
+		}
+	}
+	return out
+}
+
+// isGalleryShot reports whether a filename is "<id>_<n>.<ext>" rather than a
+// cover. Item ids themselves contain underscores ("01_5027"), so only a
+// trailing "_<digits>" beyond the id counts.
+func isGalleryShot(name string) bool {
+	base := strings.TrimSuffix(name, filepath.Ext(name))
+	i := strings.LastIndex(base, "_")
+	if i < 0 {
+		return false
+	}
+	tail := base[i+1:]
+	if tail == "" {
+		return false
+	}
+	for _, r := range tail {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	// "01_5027" is a cover: the part before the underscore is the "01" prefix.
+	return base[:i] != "01"
+}
+
+// coverIsPlaceholder reports whether the stored cover for id is one of the
+// shared images, i.e. not a real photo of this product.
+func (c *Client) coverIsPlaceholder(shared map[string]bool, id string) bool {
+	if len(shared) == 0 {
+		return false
+	}
+	for _, ext := range []string{".jpg", ".jpeg", ".png", ".webp"} {
+		h, err := fileHash(filepath.Join(c.PhotosDir, id+ext))
+		if err == nil {
+			return shared[h]
+		}
+	}
+	return false
 }

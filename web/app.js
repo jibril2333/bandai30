@@ -330,6 +330,7 @@ const INTERVALS = [
   { v: '24h', l: '每天' },
   { v: '72h', l: '每 3 天' },
   { v: '168h', l: '每周' },
+  { v: '336h', l: '每 2 周' },
   { v: '720h', l: '每 30 天' },
 ];
 
@@ -338,6 +339,12 @@ function fmtTime(unix) {
   const d = new Date(unix * 1000);
   const p = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function intervalSelect(id, cur) {
+  const known = INTERVALS.some(i => i.v === cur);
+  return `<select id="${id}">${INTERVALS.map(i =>
+    `<option value="${i.v}" ${i.v === (known ? cur : '') ? 'selected' : ''}>${i.l}</option>`).join('')}</select>`;
 }
 
 async function renderSettings() {
@@ -350,25 +357,18 @@ async function renderSettings() {
     $('main').innerHTML = `<div class="landing"><h1>设置</h1><div class="empty">读取失败: ${escapeHtml(e.message)}</div></div>`;
     return;
   }
-  const cur = INTERVALS.some(i => i.v === cfg.autoInterval) ? cfg.autoInterval : '168h';
-
   $('main').innerHTML = `<div class="landing settings">
     <h1>设置</h1>
-    <p class="lede">自动更新会在后台按下面的设置抓取万代官网。设置存在数据库里，重新部署不会丢。</p>
+    <p class="lede">自动更新在后台抓取万代官网。两种更新各有独立的周期，设置存在数据库里，重新部署不会丢。</p>
 
     <div class="set-card">
       <div class="set-row">
-        <div class="set-label"><b>自动更新频率</b><small>关闭后只能手动点「检查更新」</small></div>
-        <select id="s-interval">
-          ${INTERVALS.map(i => `<option value="${i.v}" ${i.v === cur ? 'selected' : ''}>${i.l}</option>`).join('')}
-        </select>
+        <div class="set-label"><b>增量更新</b><small>只读列表页：新品、改价、改名。约 1 分钟</small></div>
+        ${intervalSelect('s-interval', cfg.autoInterval)}
       </div>
       <div class="set-row">
-        <div class="set-label"><b>自动更新方式</b><small>全量会逐个打开详情页补齐多图，耗时数分钟</small></div>
-        <select id="s-mode">
-          <option value="incremental" ${cfg.autoMode !== 'full' ? 'selected' : ''}>增量（只读列表页）</option>
-          <option value="full" ${cfg.autoMode === 'full' ? 'selected' : ''}>全量（含详情页多图）</option>
-        </select>
+        <div class="set-label"><b>全量更新</b><small>逐个打开详情页补齐多图，并替换占位图。数分钟，建议设得比增量长</small></div>
+        ${intervalSelect('s-full', cfg.fullInterval)}
       </div>
       <div class="set-actions">
         <span class="set-state" id="s-state"></span>
@@ -377,8 +377,10 @@ async function renderSettings() {
     </div>
 
     <div class="set-card">
-      <div class="set-row"><div class="set-label"><b>上次运行</b></div><span>${fmtTime(cfg.lastRun)}</span></div>
-      <div class="set-row"><div class="set-label"><b>下次运行</b></div><span>${cfg.nextRun ? fmtTime(cfg.nextRun) : '已关闭'}</span></div>
+      <div class="set-row"><div class="set-label"><b>增量 · 上次 / 下次</b></div>
+        <span>${fmtTime(cfg.lastRun)} → ${cfg.nextRun ? fmtTime(cfg.nextRun) : '已关闭'}</span></div>
+      <div class="set-row"><div class="set-label"><b>全量 · 上次 / 下次</b></div>
+        <span>${fmtTime(cfg.lastFullRun)} → ${cfg.nextFullRun ? fmtTime(cfg.nextFullRun) : '已关闭'}</span></div>
       <div class="set-row"><div class="set-label"><b>手动更新</b><small>随时触发一次，与自动更新共用同一把锁</small></div>${refreshBtnHTML('')}</div>
     </div>
   </div>`;
@@ -387,7 +389,7 @@ async function renderSettings() {
     const st = $('s-state');
     st.textContent = '保存中…'; st.className = 'set-state';
     try {
-      await api.saveSettings({ autoInterval: $('s-interval').value, autoMode: $('s-mode').value });
+      await api.saveSettings({ autoInterval: $('s-interval').value, fullInterval: $('s-full').value });
       st.textContent = '已保存 ✓'; st.className = 'set-state ok';
       setTimeout(() => render(), 800);   // refresh the "next run" line
     } catch (e) {
@@ -436,7 +438,6 @@ function renderCollectionPage() {
         <span class="sub">${escapeHtml(col.name)}${col.tagline ? ' · ' + escapeHtml(col.tagline) : ''} · 共 ${counts.all} 件 · 已收集 <span id="owned-count">${owned}</span></span>
         <div class="head-actions">
           <span class="save-state" id="save-state"></span>
-          ${col.scraper ? refreshBtnHTML(col.slug) : ''}
           <div class="view-toggle">
             <button data-v="grid" class="${state.view === 'grid' ? 'active' : ''}" aria-label="网格视图">▦</button>
             <button data-v="list" class="${state.view === 'list' ? 'active' : ''}" aria-label="列表视图">☰</button>
@@ -461,7 +462,6 @@ function renderCollectionPage() {
       <div class="empty" id="empty" hidden>没有匹配的条目</div>
     </div>`;
   wireToolbar();
-  wireRefresh();
   buildGrid();
 }
 

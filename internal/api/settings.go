@@ -6,7 +6,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/rei/bandai30/internal/scrape"
 	"github.com/rei/bandai30/internal/store"
 )
 
@@ -14,16 +13,14 @@ import (
 // the read-only schedule state that makes them meaningful.
 type settingsView struct {
 	store.Settings
-	LastRun int64 `json:"lastRun"` // unix seconds, 0 = never
-	NextRun int64 `json:"nextRun"` // unix seconds, 0 = disabled or unknown
+	LastRun     int64 `json:"lastRun"`     // last incremental (or full), 0 = never
+	NextRun     int64 `json:"nextRun"`     // 0 = disabled
+	LastFullRun int64 `json:"lastFullRun"` // 0 = never
+	NextFullRun int64 `json:"nextFullRun"` // 0 = disabled
 }
 
-func (s *Server) envDefaults() (interval, mode string) {
-	mode = os.Getenv("BANDAI30_SCRAPE_MODE")
-	if mode == "" {
-		mode = string(scrape.ModeIncremental)
-	}
-	return os.Getenv("BANDAI30_SCRAPE_INTERVAL"), mode
+func (s *Server) envDefaults() (interval, full string) {
+	return os.Getenv("BANDAI30_SCRAPE_INTERVAL"), os.Getenv("BANDAI30_FULL_INTERVAL")
 }
 
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
@@ -41,6 +38,12 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 			out.NextRun = last.Add(d).Unix()
 		}
 	}
+	if last, err := s.Store.GetMetaTime(ctx, "last_full_scrape_at"); err == nil && !last.IsZero() {
+		out.LastFullRun = last.Unix()
+		if d := cfg.Full(); d > 0 {
+			out.NextFullRun = last.Add(d).Unix()
+		}
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -51,16 +54,14 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Validate here rather than letting a typo silently disable the scheduler.
-	if in.AutoInterval != "" {
-		d, err := time.ParseDuration(in.AutoInterval)
-		if err != nil || d < time.Minute {
-			writeErr(w, http.StatusBadRequest, "autoInterval must be a duration ≥ 1m, e.g. 168h")
+	for name, v := range map[string]string{"autoInterval": in.AutoInterval, "fullInterval": in.FullInterval} {
+		if v == "" {
+			continue // explicit "off"
+		}
+		if d, err := time.ParseDuration(v); err != nil || d < time.Minute {
+			writeErr(w, http.StatusBadRequest, name+" must be a duration ≥ 1m, e.g. 168h")
 			return
 		}
-	}
-	if in.AutoMode != string(scrape.ModeIncremental) && in.AutoMode != string(scrape.ModeFull) {
-		writeErr(w, http.StatusBadRequest, "autoMode must be incremental or full")
-		return
 	}
 	if err := s.Store.SaveSettings(ctxOf(r), in); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
