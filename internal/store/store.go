@@ -152,6 +152,78 @@ func (s *Store) UpsertCatalog(ctx context.Context, it *Item) error {
 	return err
 }
 
+// --- Gallery photos ---
+
+// SetItemPhotos replaces an item's gallery in one transaction. Passing an
+// empty slice is a no-op rather than a wipe: a detail page that failed to
+// parse should leave the pictures we already have alone.
+func (s *Store) SetItemPhotos(ctx context.Context, itemID string, urls []string) error {
+	if len(urls) == 0 {
+		return nil
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM item_photos WHERE item_id=?`, itemID); err != nil {
+		return err
+	}
+	for i, u := range urls {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO item_photos(item_id, idx, url) VALUES(?,?,?)`, itemID, i, u); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// ItemPhotos returns an item's gallery in display order.
+func (s *Store) ItemPhotos(ctx context.Context, itemID string) ([]string, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT url FROM item_photos WHERE item_id=? ORDER BY idx`, itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// ItemsWithoutGallery lists ids that have no gallery yet, so an incremental
+// run can fill the gaps without visiting every detail page.
+func (s *Store) ItemsWithoutGallery(ctx context.Context, series string) ([]string, error) {
+	q := `SELECT i.id FROM items i
+	      WHERE NOT EXISTS (SELECT 1 FROM item_photos p WHERE p.item_id = i.id)`
+	args := []any{}
+	if series != "" {
+		q += ` AND i.series = ?`
+		args = append(args, series)
+	}
+	q += ` ORDER BY i.id`
+	rows, err := s.DB.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) GetItem(ctx context.Context, id string) (*Item, error) {
 	row := s.DB.QueryRowContext(ctx, `SELECT id, series, category, name, name_zh, release_date, price, status, notes, photo_url, created_at, updated_at FROM items WHERE id=?`, id)
 	var it Item

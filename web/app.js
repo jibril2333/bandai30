@@ -79,8 +79,12 @@ const api = {
   deleteItem: (id) => api.fetch(`/api/items/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   upload: (file) => { const fd = new FormData(); fd.append('file', file); return api.fetch('/api/upload', { method: 'POST', body: fd }); },
   // slug omitted = refresh every collection
-  scrape: (slug) => api.fetch('/api/scrape' + (slug ? `/${slug}` : ''), { method: 'POST' }),
+  scrape: (slug, mode) => api.fetch('/api/scrape' + (slug ? `/${slug}` : '') +
+    (mode === 'full' ? '?mode=full' : ''), { method: 'POST' }),
   scrapeStatus: () => api.fetch('/api/scrape/status'),
+  item: (id) => api.fetch(`/api/items/${encodeURIComponent(id)}`),
+  settings: () => api.fetch('/api/settings'),
+  saveSettings: (s) => api.fetch('/api/settings', { method: 'PUT', body: s }),
 };
 
 // ---------- routing ----------
@@ -88,6 +92,7 @@ function currentRoute() {
   const h = location.hash.replace(/^#\/?/, '').toLowerCase();
   if (!h) return { name: 'landing' };
   if (h === 'mine') return { name: 'mine' };
+  if (h === 'settings') return { name: 'settings' };
   const c = bySlug(h);
   return c ? { name: 'collection', code: c.code } : { name: 'landing' };
 }
@@ -115,6 +120,9 @@ async function render() {
   const r = currentRoute();
   if (r.name === 'landing') {
     await renderLanding();
+  } else if (r.name === 'settings') {
+    document.documentElement.style.setProperty('--primary', '#e8467a');
+    await renderSettings();
   } else if (r.name === 'mine') {
     document.documentElement.style.setProperty('--primary', '#e8467a');
     await renderMine();
@@ -142,8 +150,10 @@ function renderNav() {
     const total = (state.stats[c.code] && state.stats[c.code].total) || 0;
     return `<a href="#/${c.slug}" class="${active ? 'active' : ''}" style="--accent:${c.color}">${c.code} <span style="opacity:.6">${total}</span></a>`;
   }).join('');
+  const setActive = cur.name === 'settings' ? ' active' : '';
   $('seriesnav').innerHTML =
-    `<a href="#/mine" class="nav-mine${mineActive}" style="--accent:#e8467a">★ 我的</a>` + seriesHTML;
+    `<a href="#/mine" class="nav-mine${mineActive}" style="--accent:#e8467a">★ 我的</a>` + seriesHTML +
+    `<a href="#/settings" class="nav-set${setActive}" style="--accent:#7a7074" title="设置">⚙</a>`;
   // keep the active series visible in the horizontal-scroll nav (mobile)
   const act = $('seriesnav').querySelector('a.active');
   if (act) act.scrollIntoView({ inline: 'center', block: 'nearest' });
@@ -312,6 +322,81 @@ async function renderMine() {
   $('main').querySelectorAll('.card').forEach(el => { el.onclick = () => openView(el.dataset.id); });
 }
 
+// ---------- 设置 ----------
+// Presets rather than a free-text duration: the field is a Go duration string
+// and a typo would silently disable the scheduler.
+const INTERVALS = [
+  { v: '', l: '关闭' },
+  { v: '24h', l: '每天' },
+  { v: '72h', l: '每 3 天' },
+  { v: '168h', l: '每周' },
+  { v: '720h', l: '每 30 天' },
+];
+
+function fmtTime(unix) {
+  if (!unix) return '—';
+  const d = new Date(unix * 1000);
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+async function renderSettings() {
+  document.title = '设置 · Bandai 收藏';
+  state.col = null;
+  let cfg;
+  try {
+    cfg = await api.settings();
+  } catch (e) {
+    $('main').innerHTML = `<div class="landing"><h1>设置</h1><div class="empty">读取失败: ${escapeHtml(e.message)}</div></div>`;
+    return;
+  }
+  const cur = INTERVALS.some(i => i.v === cfg.autoInterval) ? cfg.autoInterval : '168h';
+
+  $('main').innerHTML = `<div class="landing settings">
+    <h1>设置</h1>
+    <p class="lede">自动更新会在后台按下面的设置抓取万代官网。设置存在数据库里，重新部署不会丢。</p>
+
+    <div class="set-card">
+      <div class="set-row">
+        <div class="set-label"><b>自动更新频率</b><small>关闭后只能手动点「检查更新」</small></div>
+        <select id="s-interval">
+          ${INTERVALS.map(i => `<option value="${i.v}" ${i.v === cur ? 'selected' : ''}>${i.l}</option>`).join('')}
+        </select>
+      </div>
+      <div class="set-row">
+        <div class="set-label"><b>自动更新方式</b><small>全量会逐个打开详情页补齐多图，耗时数分钟</small></div>
+        <select id="s-mode">
+          <option value="incremental" ${cfg.autoMode !== 'full' ? 'selected' : ''}>增量（只读列表页）</option>
+          <option value="full" ${cfg.autoMode === 'full' ? 'selected' : ''}>全量（含详情页多图）</option>
+        </select>
+      </div>
+      <div class="set-actions">
+        <span class="set-state" id="s-state"></span>
+        <button id="s-save" class="primary">保存</button>
+      </div>
+    </div>
+
+    <div class="set-card">
+      <div class="set-row"><div class="set-label"><b>上次运行</b></div><span>${fmtTime(cfg.lastRun)}</span></div>
+      <div class="set-row"><div class="set-label"><b>下次运行</b></div><span>${cfg.nextRun ? fmtTime(cfg.nextRun) : '已关闭'}</span></div>
+      <div class="set-row"><div class="set-label"><b>手动更新</b><small>随时触发一次，与自动更新共用同一把锁</small></div>${refreshBtnHTML('')}</div>
+    </div>
+  </div>`;
+
+  $('s-save').onclick = async () => {
+    const st = $('s-state');
+    st.textContent = '保存中…'; st.className = 'set-state';
+    try {
+      await api.saveSettings({ autoInterval: $('s-interval').value, autoMode: $('s-mode').value });
+      st.textContent = '已保存 ✓'; st.className = 'set-state ok';
+      setTimeout(() => render(), 800);   // refresh the "next run" line
+    } catch (e) {
+      st.textContent = '保存失败: ' + e.message; st.className = 'set-state err';
+    }
+  };
+  wireRefresh();
+}
+
 // ---------- collection page ----------
 async function loadCollection(code) {
   state.col = byCode(code);
@@ -389,19 +474,29 @@ function renderCollectionPage() {
 let scrapeTimer = null;
 
 function refreshBtnHTML(slug) {
-  return `<button class="refresh-btn" id="refresh-btn" data-slug="${escapeAttr(slug || '')}" title="从万代官网抓取最新商品"><span class="rb-icon">↻</span><span class="rb-label">检查更新</span></button>`;
+  // Two buttons, because the costs differ by two orders of magnitude: the
+  // incremental pass reads a handful of listing pages, the full one opens
+  // every item's detail page.
+  return `<span class="refresh-group">
+    <button class="refresh-btn" id="refresh-btn" data-slug="${escapeAttr(slug || '')}" data-mode="incremental" title="只读列表页，检查新品与价格变动（约 1 分钟）"><span class="rb-icon">↻</span><span class="rb-label">检查更新</span></button>
+    <button class="refresh-btn rb-full" id="refresh-full" data-slug="${escapeAttr(slug || '')}" data-mode="full" title="逐个打开商品详情页，补齐多图与详情（数分钟）">全量</button>
+  </span>`;
 }
 
 function paintRefreshBtn(st) {
   const btn = $('refresh-btn');
   if (!btn) return;
+  const full = $('refresh-full');
+  if (full) full.disabled = !!st.running;
   const label = btn.querySelector('.rb-label');
   btn.classList.toggle('running', !!st.running);
   btn.disabled = !!st.running;
   if (st.running) {
     const scope = st.current ? ` · ${st.current}` : '';
     const prog = st.total ? ` ${st.completed}/${st.total}` : '';
-    label.textContent = `更新中${prog}${scope}`;
+    const kind = st.mode === 'full' ? '全量' : '';
+    const pics = st.photos ? ` · ${st.photos} 图` : '';
+    label.textContent = `${kind}更新中${prog}${scope}${pics}`;
   } else {
     label.textContent = '检查更新';
   }
@@ -410,21 +505,24 @@ function paintRefreshBtn(st) {
 function refreshDone(st) {
   const btn = $('refresh-btn');
   if (!btn) return;
+  const full = $('refresh-full');
+  if (full) full.disabled = false;
   const label = btn.querySelector('.rb-label');
   btn.classList.remove('running');
   btn.disabled = false;
   const n = (st.newItems || []).length;
+  const pics = st.photos || 0;
   if (st.err) {
     btn.classList.add('failed');
     label.textContent = '更新失败';
   } else {
     btn.classList.add('ok');
-    label.textContent = n ? `发现 ${n} 个新品` : '已是最新';
+    label.textContent = n ? `发现 ${n} 个新品` : (pics ? `补齐 ${pics} 张图` : '已是最新');
   }
   // Let the result read for a moment, then settle back. A run that found
   // something re-renders, so the new items actually appear.
   setTimeout(() => {
-    if (n) { render(); return; }
+    if (n || pics) { render(); return; }
     btn.classList.remove('ok', 'failed');
     paintRefreshBtn({ running: false });
   }, 2500);
@@ -444,10 +542,12 @@ function pollScrape() {
 function wireRefresh() {
   const btn = $('refresh-btn');
   if (!btn) return;
-  btn.onclick = async () => {
-    paintRefreshBtn({ running: true });
+  const start = async (el) => {
+    if (el.dataset.mode === 'full' &&
+        !confirm('全量更新会逐个打开每件商品的详情页补齐多图，需要数分钟。继续？')) return;
+    paintRefreshBtn({ running: true, mode: el.dataset.mode });
     try {
-      paintRefreshBtn(await api.scrape(btn.dataset.slug));
+      paintRefreshBtn(await api.scrape(el.dataset.slug, el.dataset.mode));
     } catch (e) {
       // 409 = the weekly job (or another tab) got there first; just follow it.
       if (!/already running/i.test(e.message || '')) {
@@ -459,6 +559,9 @@ function wireRefresh() {
     }
     pollScrape();
   };
+  btn.onclick = () => start(btn);
+  const full = $('refresh-full');
+  if (full) full.onclick = () => start(full);
   // Pick up a run already in flight (weekly job, or started in another tab).
   api.scrapeStatus().then(st => { if (st.running) { paintRefreshBtn(st); pollScrape(); } }).catch(() => {});
 }
@@ -657,6 +760,10 @@ function openView(id) {
     vp.className = 'view-photo noimg';
     vp.innerHTML = '<span>暂无官方图片</span>';
   }
+  // The list payload only carries the cover. Show it at once, then fetch the
+  // rest so opening a card never waits on a request.
+  $('v-thumbs').hidden = true;
+  loadGallery(id, m.photoUrl);
   $('v-badges').innerHTML =
     `<span class="badge series" style="background:${col.color}22;color:${col.color}">${escapeHtml(col.code || m.series)}</span>` +
     (m.category ? `<span class="badge cat">${escapeHtml(m.category)}</span>` : '');
@@ -681,6 +788,43 @@ function openView(id) {
   if (m.notes) { $('v-notes').textContent = m.notes; nw.hidden = false; } else nw.hidden = true;
 
   $('view-bg').hidden = false;
+}
+
+// ---------- 详情页图库 ----------
+let galleryShots = [];
+
+async function loadGallery(id, cover) {
+  let shots = [];
+  try {
+    shots = (await api.item(id)).photos || [];
+  } catch { return; }
+  if (state.viewingId !== id) return;   // user moved on while we fetched
+  // The cover is usually the first gallery shot too; don't show it twice.
+  galleryShots = shots.length ? shots : (cover ? [cover] : []);
+  if (cover && !galleryShots.includes(cover)) galleryShots.unshift(cover);
+  const strip = $('v-thumbs');
+  if (galleryShots.length < 2) { strip.hidden = true; return; }
+  strip.innerHTML = galleryShots.map((u, i) =>
+    `<button class="vthumb${i === 0 ? ' active' : ''}" data-i="${i}" aria-label="第 ${i + 1} 张">
+       <img src="${escapeAttr(u)}" loading="lazy" alt=""></button>`).join('');
+  strip.hidden = false;
+  strip.querySelectorAll('.vthumb').forEach(b => {
+    b.onclick = () => showShot(+b.dataset.i);
+  });
+}
+
+function showShot(i) {
+  if (i < 0 || i >= galleryShots.length) return;
+  const vp = $('v-photo');
+  vp.className = 'view-photo';
+  vp.innerHTML = `<img src="${escapeAttr(galleryShots[i])}" alt="">`;
+  $('v-thumbs').querySelectorAll('.vthumb').forEach(b =>
+    b.classList.toggle('active', +b.dataset.i === i));
+}
+
+function currentShot() {
+  const a = $('v-thumbs').querySelector('.vthumb.active');
+  return a ? +a.dataset.i : 0;
 }
 
 function renderViewStatus(m, type) {
@@ -870,6 +1014,11 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     if (!$('modal-bg').hidden) closeModal();
     else if (!$('view-bg').hidden) closeView();
+  }
+  // Arrow keys page through the gallery while the detail view is open.
+  if (!$('view-bg').hidden && galleryShots.length > 1) {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); showShot(currentShot() - 1); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); showShot(currentShot() + 1); }
   }
   if (e.key === '/' && document.activeElement && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
     const s = $('search'); if (s) { e.preventDefault(); s.focus(); }

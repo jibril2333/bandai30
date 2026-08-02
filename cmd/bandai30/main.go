@@ -168,13 +168,19 @@ func main() {
 
 	scraper := scrape.New(st, photosDir)
 	notifier := notify.New(os.Getenv("BANDAI30_NTFY_SERVER"), os.Getenv("BANDAI30_NTFY_TOPIC"))
-	var interval time.Duration
-	if iv := os.Getenv("BANDAI30_SCRAPE_INTERVAL"); iv != "" {
-		if d, perr := time.ParseDuration(iv); perr == nil && d >= time.Minute {
-			interval = d
-			log.Printf("auto-scrape every %s (ntfy: %v)", d, notifier.Enabled())
+	// The environment only seeds the defaults; once the owner saves anything on
+	// the settings page, the database wins. That matters here because the
+	// container is recreated on every deploy.
+	defInterval := os.Getenv("BANDAI30_SCRAPE_INTERVAL")
+	defMode := os.Getenv("BANDAI30_SCRAPE_MODE")
+	if defMode == "" {
+		defMode = string(scrape.ModeIncremental)
+	}
+	if cfg, err := st.GetSettings(ctx, defInterval, defMode); err == nil {
+		if cfg.Interval() > 0 {
+			log.Printf("auto-scrape every %s, mode=%s (ntfy: %v)", cfg.Interval(), cfg.AutoMode, notifier.Enabled())
 		} else {
-			log.Printf("ignoring BANDAI30_SCRAPE_INTERVAL=%q (need a duration ≥ 1m, e.g. 168h)", iv)
+			log.Printf("auto-scrape disabled (ntfy: %v)", notifier.Enabled())
 		}
 	}
 	// One goroutine for both, in sequence: the server starts listening
@@ -185,9 +191,7 @@ func main() {
 	// shouldn't have to configure a schedule to get any data at all.
 	go func() {
 		firstRunScrape(ctx, st, scraper)
-		if interval > 0 {
-			scheduledScrape(ctx, st, scraper, notifier, interval)
-		}
+		scheduledScrape(ctx, st, scraper, notifier, defInterval, defMode)
 	}()
 
 	srv := &api.Server{
@@ -246,7 +250,7 @@ func firstRunScrape(ctx context.Context, st *store.Store, scraper *scrape.Client
 	if err := st.SetMetaTime(ctx, lastScrapeKey, time.Now()); err != nil {
 		log.Printf("first-run scrape: record run time: %v", err)
 	}
-	fresh, err := scraper.Run(ctx, "", "first-run")
+	fresh, err := scraper.Run(ctx, "", "first-run", scrape.ModeIncremental)
 	if err != nil {
 		log.Printf("first-time scrape: %v", err)
 		return
@@ -272,8 +276,38 @@ const settleDelay = 2 * time.Minute
 // would keep getting reset and might never fire at all. Persisting the
 // timestamp also means a scrape missed while the machine was off runs shortly
 // after it comes back, instead of being silently skipped.
-func scheduledScrape(ctx context.Context, st *store.Store, scraper *scrape.Client, notifier *notify.Ntfy, every time.Duration) {
+// scheduledScrape refreshes on a persistent schedule and pushes a phone
+// notification (via ntfy) summarising any brand-new items.
+//
+// The interval and mode are re-read from the database every cycle, so a change
+// made on the settings page takes effect at the next tick instead of needing a
+// restart. defInterval/defMode seed the very first read from the environment.
+//
+// The interval is measured from the last attempt RECORDED IN THE DATABASE, not
+// from process start. A plain time.Ticker restarts its countdown on every
+// launch, which is fine at 24h but breaks at weekly cadence: this app is
+// redeployed by git push and the Mac sleeps/reboots, so a week-long timer would
+// keep getting reset and might never fire at all. Persisting the timestamp also
+// means a scrape missed while the machine was off runs shortly after it comes
+// back, instead of being silently skipped.
+func scheduledScrape(ctx context.Context, st *store.Store, scraper *scrape.Client, notifier *notify.Ntfy, defInterval, defMode string) {
 	for {
+		cfg, err := st.GetSettings(ctx, defInterval, defMode)
+		if err != nil {
+			log.Printf("auto-scrape: read settings: %v", err)
+		}
+		every := cfg.Interval()
+		if every == 0 {
+			// Disabled. Idle politely and look again, so switching it back on
+			// from the settings page doesn't need a restart either.
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(settleDelay):
+			}
+			continue
+		}
+
 		wait := settleDelay
 		last, err := st.GetMetaTime(ctx, lastScrapeKey)
 		if err != nil {
@@ -282,7 +316,7 @@ func scheduledScrape(ctx context.Context, st *store.Store, scraper *scrape.Clien
 			if due := time.Until(last.Add(every)); due > wait {
 				wait = due
 			}
-			log.Printf("auto-scrape: last run %s, next in %s", last.Format(time.RFC3339), wait.Round(time.Minute))
+			log.Printf("auto-scrape: last run %s, next in %s (%s)", last.Format(time.RFC3339), wait.Round(time.Minute), cfg.AutoMode)
 		} else {
 			log.Printf("auto-scrape: no previous run recorded, first refresh in %s", wait)
 		}
@@ -299,7 +333,7 @@ func scheduledScrape(ctx context.Context, st *store.Store, scraper *scrape.Clien
 		if err := st.SetMetaTime(ctx, lastScrapeKey, time.Now()); err != nil {
 			log.Printf("auto-scrape: record run time: %v", err)
 		}
-		fresh, err := scraper.Run(ctx, "", "weekly")
+		fresh, err := scraper.Run(ctx, "", "auto", scrape.Mode(cfg.AutoMode))
 		if err != nil {
 			// Busy means a manual refresh is in flight; it covers the same
 			// ground, so skip this tick rather than queueing behind it.

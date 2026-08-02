@@ -66,10 +66,32 @@ back, rather than being skipped.
 The run time is recorded *before* scraping, so a week of failing sources
 retries next week instead of hammering Bandai in a hot loop.
 
+### Full vs incremental
+
+A refresh comes in two sizes, because their costs differ by two orders of
+magnitude:
+
+| | reads | cost |
+|---|---|---|
+| **incremental** (default) | brand listings only; galleries filled in for items that lack one | a handful of pages, ~1 min |
+| **full** | the above, plus EVERY item's detail page, re-reading its gallery | ~700 requests, paced 400ms apart, several minutes |
+
+Existing items are updated either way: name, price, release date and category
+come off the listing on every run, so a price change or a renamed product is
+picked up without a full pass. Full mode exists for the gallery, which only the
+detail page carries.
+
+The settings page (⚙ in the header) chooses the interval and which mode the
+automatic run uses, and both are stored in the database — the container is
+recreated on every deploy, so anything kept only in the environment would
+revert. `BANDAI30_SCRAPE_INTERVAL` / `BANDAI30_SCRAPE_MODE` now only seed the
+defaults for a fresh install.
+
 ### Refreshing by hand
 
 The **检查更新** button on the dashboard refreshes every collection; the same
-button on a collection page refreshes just that one. A refresh runs for
+button on a collection page refreshes just that one. **全量** next to it runs
+the same scope in full mode. A refresh runs for
 minutes, far longer than an HTTP request should live, so the button starts it
 in the background and polls `GET /api/scrape/status` for progress — reloading
 the page mid-run picks the progress back up.

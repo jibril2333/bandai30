@@ -75,6 +75,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/scrape", authd(s.startScrape))
 	mux.Handle("POST /api/scrape/{slug}", authd(s.startScrape))
 	mux.Handle("GET /api/scrape/status", authd(s.scrapeStatus))
+	mux.Handle("GET /api/settings", authd(s.getSettings))
+	mux.Handle("PUT /api/settings", authd(s.putSettings))
 	mux.Handle("GET /api/collections", authd(s.listCollections))
 	mux.Handle("GET /api/stats", authd(s.statsHandler))
 	mux.Handle("GET /api/categories", authd(s.categoriesHandler))

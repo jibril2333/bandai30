@@ -38,12 +38,18 @@ func (s *Server) startScrape(w http.ResponseWriter, r *http.Request) {
 		scope, label = col.Code, col.Code
 	}
 
+	// ?mode=full opens every item's detail page; the default stays cheap.
+	mode := scrape.ModeIncremental
+	if r.URL.Query().Get("mode") == string(scrape.ModeFull) {
+		mode = scrape.ModeFull
+	}
+
 	user := auth.CurrentUser(r)
 	// Deliberately NOT the request context: that is cancelled the moment this
 	// response is written, which would kill the scrape a few milliseconds in.
 	// BaseCtx lives as long as the process, so the run survives the request
 	// and still stops on shutdown.
-	err := s.Scraper.Start(s.BaseCtx, scope, "manual", func(fresh []string, err error) {
+	err := s.Scraper.Start(s.BaseCtx, scope, "manual", mode, func(fresh []string, err error) {
 		if err != nil {
 			log.Printf("manual scrape %s: %v", label, err)
 			return

@@ -50,7 +50,17 @@ func (s *Server) getItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, it)
+	// The detail view shows the whole gallery; the list only ever needs the
+	// cover, so this join stays off the /api/items path.
+	photos, err := s.Store.ItemPhotos(ctxOf(r), id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		*store.Item
+		Photos []string `json:"photos"`
+	}{it, photos})
 }
 
 // createItem is disabled: the catalog is populated only by scraping official

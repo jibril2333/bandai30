@@ -45,6 +45,16 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 
+-- Gallery shots from an item's detail page. items.photo_url stays the cover
+-- image, so everything that only needs one picture is unaffected.
+CREATE TABLE IF NOT EXISTS item_photos (
+    item_id TEXT NOT NULL,
+    idx     INTEGER NOT NULL,   -- display order within the gallery
+    url     TEXT NOT NULL,      -- local path, e.g. /photos/01_5027_2.jpg
+    PRIMARY KEY (item_id, idx),
+    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+);
+
 -- Small key/value bag for scheduler bookkeeping that must outlive the process
 -- (e.g. last_scrape_at — see the weekly refresh in cmd/bandai30).
 CREATE TABLE IF NOT EXISTS meta (
