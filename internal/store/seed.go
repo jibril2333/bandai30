@@ -17,6 +17,8 @@ var DefaultCollections = []Collection{
 
 	{Code: "METAL BUILD", Slug: "metalbuild", Name: "METAL BUILD", Family: "Tamashii Nations",
 		Tagline: "高级合金成品", Color: "#b8860b", Scraper: "tamashii", ScraperArg: "metal_build", Type: "finished", SortOrder: 10},
+	{Code: "解体匠機", Slug: "kaitaishouki", Name: "METAL STRUCTURE 解体匠機", Family: "Tamashii Nations",
+		Tagline: "内部结构再现", Color: "#8b5cf6", Scraper: "tamashii", ScraperArg: "kaitai_shou_ki", Type: "finished", SortOrder: 11},
 }
 
 // SeedCollections inserts any DefaultCollections whose code is absent, and keeps

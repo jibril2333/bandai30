@@ -252,10 +252,7 @@ async function renderLanding() {
     </div>` : '';
 
   $('main').innerHTML = `<div class="landing dash">
-    <div class="dash-head">
-      <h1>我的收藏库</h1>
-      ${refreshBtnHTML('')}
-    </div>
+    <h1>我的收藏库</h1>
     <!-- column count is set from the tile count: the 未到货 tile only appears
          when something is on its way, and auto-fit would wrap it to 4+1. -->
     <div class="dash-metrics" style="--cols:${onWay.length ? 5 : 4}">
@@ -269,7 +266,6 @@ async function renderLanding() {
     ${sections}
   </div>`;
   $('main').querySelectorAll('.upcoming-card').forEach(el => { el.onclick = () => openView(el.dataset.id); });
-  wireRefresh();
 }
 
 // ---------- my collection (aggregate across all series) ----------
@@ -382,6 +378,13 @@ async function renderSettings() {
       <div class="set-row"><div class="set-label"><b>全量 · 上次 / 下次</b></div>
         <span>${fmtTime(cfg.lastFullRun)} → ${cfg.nextFullRun ? fmtTime(cfg.nextFullRun) : '已关闭'}</span></div>
       <div class="set-row"><div class="set-label"><b>手动更新</b><small>随时触发一次，与自动更新共用同一把锁</small></div>${refreshBtnHTML('')}</div>
+      <div class="set-row set-progress" id="s-progress" hidden>
+        <div class="prog-wrap">
+          <div class="prog-text" id="s-progress-text"></div>
+          <div class="prog-track"><div class="prog-bar" id="s-progress-bar"></div></div>
+          <div class="prog-fail" id="s-progress-fail" hidden></div>
+        </div>
+      </div>
     </div>
   </div>`;
 
@@ -483,11 +486,41 @@ function refreshBtnHTML(slug) {
   </span>`;
 }
 
+// The settings page carries a full progress line; the button only needs to
+// show that something is running.
+function paintProgress(st) {
+  const box = $('s-progress');
+  if (!box) return;
+  if (!st.running) { box.hidden = true; return; }
+  const kind = st.mode === 'full' ? '全量' : '增量';
+  const parts = [`${kind}更新中`];
+  if (st.total) parts.push(`系列 ${st.completed + 1}/${st.total}`);
+  if (st.current) parts.push(st.current);
+  if (st.phase === 'listing') parts.push('读取列表页');
+  if (st.phase === 'gallery') parts.push(`详情页 ${st.itemsDone}/${st.itemsAll}`);
+  if (st.photos) parts.push(`已下载 ${st.photos} 张图`);
+  if ((st.newItems || []).length) parts.push(`发现 ${st.newItems.length} 个新品`);
+  $('s-progress-text').textContent = parts.join(' · ');
+
+  // Two nested bars would be confusing; show whichever phase is finer-grained.
+  let pct = st.total ? (st.completed / st.total) * 100 : 0;
+  if (st.phase === 'gallery' && st.itemsAll) {
+    pct = ((st.completed + st.itemsDone / st.itemsAll) / (st.total || 1)) * 100;
+  }
+  $('s-progress-bar').style.width = Math.min(100, Math.max(2, pct)) + '%';
+  const fails = (st.failures || []).length;
+  const fe = $('s-progress-fail');
+  fe.hidden = !fails;
+  if (fails) fe.textContent = `${fails} 项失败（详见容器日志）`;
+  box.hidden = false;
+}
+
 function paintRefreshBtn(st) {
   const btn = $('refresh-btn');
   if (!btn) return;
   const full = $('refresh-full');
   if (full) full.disabled = !!st.running;
+  paintProgress(st);
   const label = btn.querySelector('.rb-label');
   btn.classList.toggle('running', !!st.running);
   btn.disabled = !!st.running;
@@ -507,6 +540,7 @@ function refreshDone(st) {
   if (!btn) return;
   const full = $('refresh-full');
   if (full) full.disabled = false;
+  paintProgress({ running: false });
   const label = btn.querySelector('.rb-label');
   btn.classList.remove('running');
   btn.disabled = false;

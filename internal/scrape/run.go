@@ -46,6 +46,13 @@ type RunState struct {
 	Total     int    `json:"total"`     // collections in this run
 	Photos    int    `json:"photos"`    // gallery shots downloaded
 
+	// Progress within the current collection. The gallery pass is the slow
+	// part of a full run — minutes per collection — so it needs its own
+	// counter or the UI looks frozen.
+	Phase     string `json:"phase"`     // "listing" | "gallery" | ""
+	ItemsDone int    `json:"itemsDone"` // items processed in this phase
+	ItemsAll  int    `json:"itemsAll"`  // items to process in this phase
+
 	NewItems   []string `json:"newItems"`   // "<code> · <name>"
 	Failures   []string `json:"failures"`   // per-collection errors, run continues
 	StartedAt  int64    `json:"startedAt"`  // unix seconds
@@ -112,6 +119,7 @@ func (c *Client) finish(ctx context.Context, scope, trigger string, mode Mode) (
 	c.mu.Lock()
 	c.state.Running = false
 	c.state.Current = ""
+	c.state.Phase, c.state.ItemsDone, c.state.ItemsAll = "", 0, 0
 	c.state.FinishedAt = time.Now().Unix()
 	if err != nil {
 		c.state.Err = err.Error()
@@ -152,6 +160,7 @@ func (c *Client) run(ctx context.Context, scope, trigger string, mode Mode) ([]s
 		c.state.Current = col.Code
 		c.mu.Unlock()
 
+		c.setPhase("listing", 0, 0)
 		rep, err := c.ScrapeCollection(ctx, &col)
 		if err != nil {
 			log.Printf("%s scrape %s: %v", trigger, col.Code, err)
@@ -229,8 +238,10 @@ func (c *Client) galleries(ctx context.Context, code string, mode Mode, trigger 
 		return nil
 	}
 	log.Printf("%s %s: gallery pass over %d item(s) (%s)", trigger, code, len(ids), mode)
+	c.setPhase("gallery", 0, len(ids))
 
-	for _, id := range ids {
+	for n, id := range ids {
+		c.setPhase("gallery", n+1, len(ids))
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -250,6 +261,13 @@ func (c *Client) galleries(ctx context.Context, code string, mode Mode, trigger 
 		}
 	}
 	return nil
+}
+
+// setPhase records where inside a collection the run currently is.
+func (c *Client) setPhase(phase string, done, all int) {
+	c.mu.Lock()
+	c.state.Phase, c.state.ItemsDone, c.state.ItemsAll = phase, done, all
+	c.mu.Unlock()
 }
 
 // gallerySpacing paces detail-page requests. A full pass is ~700 of them; at
