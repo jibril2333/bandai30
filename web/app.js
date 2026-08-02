@@ -85,6 +85,8 @@ const api = {
   item: (id) => api.fetch(`/api/items/${encodeURIComponent(id)}`),
   settings: () => api.fetch('/api/settings'),
   saveSettings: (s) => api.fetch('/api/settings', { method: 'PUT', body: s }),
+  backups: () => api.fetch('/api/backups'),
+  runBackup: () => api.fetch('/api/backups', { method: 'POST' }),
 };
 
 // ---------- routing ----------
@@ -337,6 +339,22 @@ function fmtTime(unix) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+function fmtSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
+  return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+function backupListHTML(list) {
+  if (!list || !list.length) return '<span class="set-label"><small>还没有备份</small></span>';
+  return `<div class="bk-items">${list.map(b => `
+    <a class="bk-item" href="/api/backups/${encodeURIComponent(b.name)}" download>
+      <span class="bk-when">${fmtTime(b.taken)}</span>
+      <span class="bk-size">${fmtSize(b.size)}</span>
+      <span class="bk-dl">下载 ↓</span>
+    </a>`).join('')}</div>`;
+}
+
 function intervalSelect(id, cur) {
   const known = INTERVALS.some(i => i.v === cur);
   return `<select id="${id}">${INTERVALS.map(i =>
@@ -346,9 +364,9 @@ function intervalSelect(id, cur) {
 async function renderSettings() {
   document.title = '设置 · Bandai 收藏';
   state.col = null;
-  let cfg;
+  let cfg, backups = [];
   try {
-    cfg = await api.settings();
+    [cfg, backups] = await Promise.all([api.settings(), api.backups().catch(() => [])]);
   } catch (e) {
     $('main').innerHTML = `<div class="landing"><h1>设置</h1><div class="empty">读取失败: ${escapeHtml(e.message)}</div></div>`;
     return;
@@ -386,13 +404,51 @@ async function renderSettings() {
         </div>
       </div>
     </div>
+
+    <div class="set-card">
+      <div class="set-row">
+        <div class="set-label"><b>自动备份</b><small>快照会先做完整性校验，不合格直接丢弃。每份约 300 KB</small></div>
+        ${intervalSelect('s-backup', cfg.backupInterval)}
+      </div>
+      <div class="set-row">
+        <div class="set-label"><b>保留份数</b><small>超出的自动删除，最旧的先删</small></div>
+        <input id="s-keep" type="number" min="1" max="365" value="${cfg.backupKeep || 14}">
+      </div>
+      <div class="set-row">
+        <div class="set-label"><b>备份 · 上次 / 下次</b></div>
+        <span>${fmtTime(cfg.lastBackup)} → ${cfg.nextBackup ? fmtTime(cfg.nextBackup) : '已关闭'}</span>
+      </div>
+      <div class="set-row">
+        <div class="set-label"><b>现有备份</b><small>下载一份存到别处——快照和数据库在同一块盘上</small></div>
+        <span class="set-state" id="b-state"></span>
+        <button id="b-now">立即备份</button>
+      </div>
+      <div class="set-row backup-list" id="b-list">${backupListHTML(backups)}</div>
+    </div>
   </div>`;
+
+  $('b-now').onclick = async () => {
+    const st = $('b-state');
+    st.textContent = '备份中…'; st.className = 'set-state';
+    try {
+      const r = await api.runBackup();
+      st.textContent = '已备份 ✓'; st.className = 'set-state ok';
+      $('b-list').innerHTML = backupListHTML(await api.backups());
+    } catch (e) {
+      st.textContent = '失败: ' + e.message; st.className = 'set-state err';
+    }
+  };
 
   $('s-save').onclick = async () => {
     const st = $('s-state');
     st.textContent = '保存中…'; st.className = 'set-state';
     try {
-      await api.saveSettings({ autoInterval: $('s-interval').value, fullInterval: $('s-full').value });
+      await api.saveSettings({
+        autoInterval: $('s-interval').value,
+        fullInterval: $('s-full').value,
+        backupInterval: $('s-backup').value,
+        backupKeep: Math.max(1, Math.min(365, +$('s-keep').value || 14)),
+      });
       st.textContent = '已保存 ✓'; st.className = 'set-state ok';
       setTimeout(() => render(), 800);   // refresh the "next run" line
     } catch (e) {

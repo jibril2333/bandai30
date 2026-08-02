@@ -119,6 +119,27 @@ Your own collection state (owned / wanted / building / finished, notes, Chinese
 names, uploaded photos) is yours alone and is never scraped — it lives only in
 your `data/` dir.
 
+## Backups
+
+The catalogue is reproducible; the collection is not. On 2026-07-31 the
+database silently lost 18 of its 64 pages — header included — and the marks
+were only recovered by parsing surviving pages and replaying the audit log.
+
+So the app snapshots itself. `VACUUM INTO` writes a fully-checkpointed copy
+from inside the process: no lock the app doesn't already hold, no outside
+process touching the bind-mounted file (the layer that most likely dropped
+those pages). Each snapshot is then reopened and checked — `integrity_check`
+plus a row count — and **deleted if it fails**, because an unverified backup is
+discovered to be useless only when it is needed.
+
+Daily by default, keeping 14 (~300 KB each), both configurable on the settings
+page along with a "立即备份" button and a per-snapshot download link. Take that
+download occasionally: the snapshots sit on the same disk as the database, so
+they survive file corruption but not a dead drive.
+
+Only the database is snapshotted. `photos/` is ~700 MB and every image can be
+re-fetched from Bandai.
+
 ## Run locally
 
 ```sh

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strconv"
 	"time"
 )
 
@@ -16,22 +17,43 @@ type Settings struct {
 	// expensive, so it gets its own, usually much longer, schedule. Empty
 	// disables it. A full run also covers everything the incremental one does.
 	FullInterval string `json:"fullInterval"`
+	// BackupInterval is how often a verified snapshot is taken. Empty disables
+	// it, which is only sensible if something else backs this file up.
+	BackupInterval string `json:"backupInterval"`
+	// BackupKeep is how many snapshots to retain. They are ~300 KB each.
+	BackupKeep int `json:"backupKeep"`
 }
 
 const (
 	keyAutoInterval = "auto_interval"
-	keyFullInterval = "full_interval"
+	keyFullInterval   = "full_interval"
+	keyBackupInterval = "backup_interval"
+	keyBackupKeep     = "backup_keep"
+
+	// defaultBackupInterval/Keep apply when nothing was ever configured: daily,
+	// a fortnight of history. At ~300 KB a snapshot that is ~4 MB total.
+	defaultBackupInterval = "24h"
+	defaultBackupKeep     = 14
 )
 
 // GetSettings returns the stored settings, falling back to the supplied
 // defaults for anything never set (first boot reads them from the
 // environment, so an untouched install behaves exactly as before).
 func (s *Store) GetSettings(ctx context.Context, defInterval, defFull string) (Settings, error) {
-	out := Settings{AutoInterval: defInterval, FullInterval: defFull}
+	out := Settings{
+		AutoInterval:   defInterval,
+		FullInterval:   defFull,
+		BackupInterval: defaultBackupInterval,
+		BackupKeep:     defaultBackupKeep,
+	}
 	for _, f := range []struct {
 		key string
 		dst *string
-	}{{keyAutoInterval, &out.AutoInterval}, {keyFullInterval, &out.FullInterval}} {
+	}{
+		{keyAutoInterval, &out.AutoInterval},
+		{keyFullInterval, &out.FullInterval},
+		{keyBackupInterval, &out.BackupInterval},
+	} {
 		v, err := s.GetMeta(ctx, f.key)
 		if err != nil {
 			return out, err
@@ -42,6 +64,11 @@ func (s *Store) GetSettings(ctx context.Context, defInterval, defFull string) (S
 			*f.dst = ""
 		} else if v != "" {
 			*f.dst = v
+		}
+	}
+	if v, err := s.GetMeta(ctx, keyBackupKeep); err == nil && v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			out.BackupKeep = n
 		}
 	}
 	return out, nil
@@ -59,7 +86,13 @@ func (s *Store) SaveSettings(ctx context.Context, in Settings) error {
 	if err := s.SetMeta(ctx, keyAutoInterval, blank(in.AutoInterval)); err != nil {
 		return err
 	}
-	return s.SetMeta(ctx, keyFullInterval, blank(in.FullInterval))
+	if err := s.SetMeta(ctx, keyFullInterval, blank(in.FullInterval)); err != nil {
+		return err
+	}
+	if err := s.SetMeta(ctx, keyBackupInterval, blank(in.BackupInterval)); err != nil {
+		return err
+	}
+	return s.SetMeta(ctx, keyBackupKeep, strconv.Itoa(in.BackupKeep))
 }
 
 func parseInterval(v string) time.Duration {
@@ -75,3 +108,6 @@ func (st Settings) Interval() time.Duration { return parseInterval(st.AutoInterv
 
 // Full is the detail-page cadence. Zero means "never".
 func (st Settings) Full() time.Duration { return parseInterval(st.FullInterval) }
+
+// BackupEvery is the snapshot cadence. Zero means "never".
+func (st Settings) BackupEvery() time.Duration { return parseInterval(st.BackupInterval) }

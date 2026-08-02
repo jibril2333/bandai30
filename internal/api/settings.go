@@ -17,6 +17,8 @@ type settingsView struct {
 	NextRun     int64 `json:"nextRun"`     // 0 = disabled
 	LastFullRun int64 `json:"lastFullRun"` // 0 = never
 	NextFullRun int64 `json:"nextFullRun"` // 0 = disabled
+	LastBackup  int64 `json:"lastBackup"`  // 0 = never
+	NextBackup  int64 `json:"nextBackup"`  // 0 = disabled
 }
 
 func (s *Server) envDefaults() (interval, full string) {
@@ -44,6 +46,12 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 			out.NextFullRun = last.Add(d).Unix()
 		}
 	}
+	if last, err := s.Store.GetMetaTime(ctx, "last_backup_at"); err == nil && !last.IsZero() {
+		out.LastBackup = last.Unix()
+		if d := cfg.BackupEvery(); d > 0 {
+			out.NextBackup = last.Add(d).Unix()
+		}
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -54,7 +62,11 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Validate here rather than letting a typo silently disable the scheduler.
-	for name, v := range map[string]string{"autoInterval": in.AutoInterval, "fullInterval": in.FullInterval} {
+	for name, v := range map[string]string{
+		"autoInterval":   in.AutoInterval,
+		"fullInterval":   in.FullInterval,
+		"backupInterval": in.BackupInterval,
+	} {
 		if v == "" {
 			continue // explicit "off"
 		}
@@ -62,6 +74,10 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, name+" must be a duration ≥ 1m, e.g. 168h")
 			return
 		}
+	}
+	if in.BackupKeep < 1 || in.BackupKeep > 365 {
+		writeErr(w, http.StatusBadRequest, "backupKeep must be between 1 and 365")
+		return
 	}
 	if err := s.Store.SaveSettings(ctxOf(r), in); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())

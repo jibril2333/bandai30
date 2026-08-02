@@ -187,6 +187,10 @@ func main() {
 		firstRunScrape(ctx, st, scraper)
 		scheduledScrape(ctx, st, scraper, notifier, defInterval, defFull)
 	}()
+	// Backups get their own goroutine on purpose: a scrape that hangs on a
+	// slow site must not be able to stop them, and they are the one thing
+	// standing between a corrupt file and losing the collection.
+	go scheduledBackup(ctx, st, filepath.Join(*dataDir, "backups"), notifier)
 
 	srv := &api.Server{
 		Store:     st,
@@ -258,6 +262,9 @@ const lastScrapeKey = "last_scrape_at"
 
 // lastFullKey tracks the detail-page pass separately from lastScrapeKey.
 const lastFullKey = "last_full_scrape_at"
+
+// lastBackupKey tracks snapshots, which run on their own goroutine.
+const lastBackupKey = "last_backup_at"
 
 // settleDelay holds off an overdue scrape briefly after startup, so a
 // redeploy doesn't fire a scrape while the container is still settling.
@@ -392,6 +399,59 @@ func scheduledScrape(ctx context.Context, st *store.Store, scraper *scrape.Clien
 		} else {
 			log.Print("auto-scrape: no new items")
 		}
+	}
+}
+
+// scheduledBackup takes a verified snapshot on the configured cadence and
+// prunes old ones.
+//
+// Like the scrape schedule, the clock is the timestamp in the database rather
+// than a process-lifetime timer: the container is recreated on every deploy,
+// and an in-process ticker would restart its countdown each time — a daily
+// backup could then never fire on a week with daily deploys.
+func scheduledBackup(ctx context.Context, st *store.Store, dir string, notifier *notify.Ntfy) {
+	for {
+		cfg, err := st.GetSettings(ctx, "", "")
+		if err != nil {
+			log.Printf("backup: read settings: %v", err)
+		}
+		every := cfg.BackupEvery()
+		if every == 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(settleDelay):
+			}
+			continue
+		}
+
+		wait := settleDelay
+		if last, err := st.GetMetaTime(ctx, lastBackupKey); err == nil && !last.IsZero() {
+			if due := time.Until(last.Add(every)); due > wait {
+				wait = due
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+
+		// Record the attempt first, so a repeatedly failing backup retries on
+		// the normal cadence instead of spinning.
+		if err := st.SetMetaTime(ctx, lastBackupKey, time.Now()); err != nil {
+			log.Printf("backup: record run time: %v", err)
+		}
+		path, err := st.Backup(ctx, dir)
+		if err != nil {
+			// Worth interrupting the owner for: this is the safety net itself
+			// failing, and it failed silently once already.
+			log.Printf("backup FAILED: %v", err)
+			_ = notifier.Send(ctx, "Bandai30: 备份失败", err.Error(), "warning,floppy_disk")
+			continue
+		}
+		n, _ := store.PruneBackups(dir, cfg.BackupKeep)
+		log.Printf("backup: wrote %s (pruned %d old)", filepath.Base(path), n)
 	}
 }
 
