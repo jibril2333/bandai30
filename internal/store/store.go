@@ -242,6 +242,17 @@ func (s *Store) DeleteItem(ctx context.Context, id string) error {
 	return err
 }
 
+// SetPhotoURL overwrites the cover URL, which UpsertCatalog deliberately will
+// not do (it keeps whatever is already there, so a scrape can never drop a
+// photo the user uploaded). Replacing a placeholder is the one case that must
+// override that, and it needs a NEW url — the file is rewritten in place, so a
+// browser holding the old bytes would otherwise keep showing them.
+func (s *Store) SetPhotoURL(ctx context.Context, id, url string) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE items SET photo_url=?, updated_at=? WHERE id=?`,
+		url, time.Now().Unix(), id)
+	return err
+}
+
 // SetCategory updates only an item's category (used by the recategorize pass).
 func (s *Store) SetCategory(ctx context.Context, id, category string) error {
 	_, err := s.DB.ExecContext(ctx, `UPDATE items SET category=? WHERE id=?`, category, id)

@@ -143,7 +143,8 @@ func (c *Client) scrapePage(ctx context.Context, brand, series string, page int,
 		// A cover shared with other items is a brand-logo placeholder, not a
 		// photo of this product: forget it so the code below fetches again,
 		// which picks up the real shot as soon as Bandai publishes one.
-		if it.PhotoURL != "" && c.coverIsPlaceholder(shared, itemID) {
+		replacing := it.PhotoURL != "" && c.coverIsPlaceholder(shared, itemID)
+		if replacing {
 			it.PhotoURL = ""
 		}
 
@@ -179,6 +180,15 @@ func (c *Client) scrapePage(ctx context.Context, brand, series string, page int,
 			continue
 		}
 		rep.Upserted++
+		// UpsertCatalog keeps an existing photo_url, so a replacement has to be
+		// written explicitly. The cache-busting suffix matters: the file keeps
+		// its name, and browsers cache photos by URL.
+		if replacing && it.PhotoURL != "" {
+			busted := fmt.Sprintf("%s?v=%d", it.PhotoURL, time.Now().Unix())
+			if err := c.Store.SetPhotoURL(ctx, itemID, busted); err != nil {
+				rep.Failures = append(rep.Failures, fmt.Sprintf("%s photo url: %v", itemID, err))
+			}
+		}
 		if existing == nil {
 			rep.NewItems = append(rep.NewItems, title)
 		}

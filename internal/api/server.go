@@ -143,6 +143,13 @@ func (s *Server) servePhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := filepath.Join(s.PhotosDir, name)
+	// A photo's URL never changes but its CONTENT does: a placeholder cover is
+	// replaced in place once Bandai publishes the real shot. With no
+	// Cache-Control the browser applies heuristic freshness and keeps serving
+	// the old bytes without ever asking — the logo appeared to survive a
+	// refresh that had in fact already fixed it. "no-cache" still allows
+	// caching, it just forces revalidation, so the usual answer is a 304.
+	w.Header().Set("Cache-Control", "no-cache")
 	http.ServeFile(w, r, path)
 }
 
