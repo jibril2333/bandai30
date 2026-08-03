@@ -889,9 +889,21 @@ async function loadGallery(id, cover) {
     shots = (await api.item(id)).photos || [];
   } catch { return; }
   if (state.viewingId !== id) return;   // user moved on while we fetched
-  // The cover is usually the first gallery shot too; don't show it twice.
-  galleryShots = shots.length ? shots : (cover ? [cover] : []);
-  if (cover && !galleryShots.includes(cover)) galleryShots.unshift(cover);
+
+  // The cover and the gallery's first shot are the same photograph from two
+  // places: the cover comes off the listing card, the gallery off the detail
+  // page. Sometimes byte-identical, sometimes the same picture at 450px vs
+  // 1500px — either way showing both put two near-identical images at the
+  // front. When a gallery exists it supersedes the cover, and it carries the
+  // larger versions.
+  //
+  // A photo the OWNER uploaded is different: it isn't in the gallery at all,
+  // so it must still lead. Scraped covers are always "<item id>.<ext>";
+  // uploads are "upload-<date>-<id>.<ext>".
+  const file = (cover || '').split('?')[0].split('/').pop();
+  const ownUpload = !!cover && !file.startsWith(id + '.');
+  galleryShots = shots.length ? shots.slice() : (cover ? [cover] : []);
+  if (ownUpload && !galleryShots.includes(cover)) galleryShots.unshift(cover);
   const strip = $('v-thumbs');
   if (galleryShots.length < 2) { strip.hidden = true; return; }
   strip.innerHTML = galleryShots.map((u, i) =>
