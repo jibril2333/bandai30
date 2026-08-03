@@ -23,9 +23,12 @@ var (
 	hobbyGalleryRE = regexp.MustCompile(`(?s)pg-products__sliderMain(.*?)pg-products__sliderThumbnail`)
 	hobbyImgSrcRE  = regexp.MustCompile(`<img[^>]+src="([^"]+)"`)
 
-	// Tamashii names every asset after the item, so filtering by id keeps
-	// related-product shots out.
-	twAssetRE = regexp.MustCompile(`/storage/images/products/[^"' >]+\.(?:jpg|jpeg|png|webp)`)
+	// Tamashii pages carry dozens of product images — recommendations, banners,
+	// other items in the same brand — so the gallery has to be located
+	// structurally. productImgWrapper is the block holding just this item's
+	// shots, on both the old and the current page template.
+	twGalleryRE = regexp.MustCompile(`(?s)productImgWrapper(.*?)productInfo"`)
+	twAssetRE   = regexp.MustCompile(`/storage/images/products/[^"' >]+\.(?:jpg|jpeg|png|webp)`)
 )
 
 // galleryURLs returns the source URLs of an item's gallery, in page order.
@@ -63,14 +66,17 @@ func (c *Client) tamashiiGallery(ctx context.Context, tid string) ([]string, err
 	if err != nil {
 		return nil, err
 	}
-	// Assets are named item_<10-digit id>_<hash>_<nn>.jpg.
-	want := fmt.Sprintf("item_%010s_", tid)
+	// Older items name their assets item_<10-digit id>_<hash>_<nn>.jpg, which
+	// made filtering by id enough. Newer ones (初音ミク and everything since)
+	// use bare UUIDs, so that filter silently returned nothing and those items
+	// ended up with no gallery at all. Scope by the container instead.
+	m := twGalleryRE.FindSubmatch(body)
+	if m == nil {
+		return nil, nil
+	}
 	var out []string
-	for _, m := range twAssetRE.FindAll(body, -1) {
-		u := string(m)
-		if strings.Contains(u, want) {
-			out = appendUnique(out, tamashiiBase+u)
-		}
+	for _, a := range twAssetRE.FindAll(m[1], -1) {
+		out = appendUnique(out, tamashiiBase+string(a))
 	}
 	return out, nil
 }
