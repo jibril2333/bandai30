@@ -113,7 +113,20 @@ func (c *Client) FetchGallery(ctx context.Context, itemID string) (int, error) {
 		return 0, err
 	}
 
+	// What each slot held last time. A file is only reusable if the source it
+	// was fetched from is the one we want now: the files are named by position
+	// ("<id>_1"), so reordering the source list — as fixing the Tamashii
+	// extractor did — leaves every file in place while the meaning of its slot
+	// moves, and slot 2 goes on showing slot 1's picture.
+	known, _ := c.Store.ItemPhotoSources(ctx, itemID)
+	// Rows predating source tracking can already be scrambled from an earlier
+	// reorder. Two slots holding byte-identical files is the signature of that,
+	// since the source list is deduplicated before it gets here — so distrust
+	// the whole gallery and fetch it again.
+	force := hasDuplicateShots(c.PhotosDir, itemID, len(known))
+
 	var local []string
+	var srcsOut []string
 	downloaded := 0
 	for i, src := range srcs {
 		ext := filepath.Ext(strings.SplitN(src, "?", 2)[0])
@@ -122,7 +135,19 @@ func (c *Client) FetchGallery(ctx context.Context, itemID string) (int, error) {
 		}
 		name := fmt.Sprintf("%s_%d%s", itemID, i+1, ext)
 		path := filepath.Join(c.PhotosDir, name)
-		if _, err := os.Stat(path); err != nil {
+
+		// Rows written before sources were recorded have none; trust those
+		// files rather than re-downloading the whole catalogue, and let the
+		// duplicate check below catch the ones that are actually wrong.
+		reusable := false
+		if _, err := os.Stat(path); err == nil && !force {
+			if i < len(known) && known[i] != "" {
+				reusable = sameSource(known[i], src)
+			} else {
+				reusable = true
+			}
+		}
+		if !reusable {
 			if err := c.downloadImage(ctx, src, path); err != nil {
 				// One bad shot shouldn't cost us the rest of the gallery.
 				continue
@@ -130,8 +155,9 @@ func (c *Client) FetchGallery(ctx context.Context, itemID string) (int, error) {
 			downloaded++
 		}
 		local = append(local, "/photos/"+name)
+		srcsOut = append(srcsOut, stripQuery(src))
 	}
-	if err := c.Store.SetItemPhotos(ctx, itemID, local); err != nil {
+	if err := c.Store.SetItemPhotos(ctx, itemID, local, srcsOut); err != nil {
 		return downloaded, err
 	}
 	return downloaded, nil
@@ -150,6 +176,33 @@ func (c *Client) FetchGallery(ctx context.Context, itemID string) (int, error) {
 // SEVERAL items, whereas a real product shot belongs to exactly one. Any cover
 // whose content is shared is treated as "no photo yet" and re-fetched on the
 // next run, until the real thing replaces it.
+
+// stripQuery removes the signature query. CloudFront and Tamashii re-sign the
+// same asset on every page load, so comparing full URLs would make every run
+// look like a fresh image.
+func stripQuery(u string) string { return strings.SplitN(u, "?", 2)[0] }
+
+// hasDuplicateShots reports whether two of an item's gallery files hold
+// identical bytes.
+func hasDuplicateShots(dir, itemID string, n int) bool {
+	seen := map[string]bool{}
+	for i := 1; i <= n; i++ {
+		for _, ext := range []string{".jpg", ".jpeg", ".png", ".webp"} {
+			h, err := fileHash(filepath.Join(dir, fmt.Sprintf("%s_%d%s", itemID, i, ext)))
+			if err != nil {
+				continue
+			}
+			if seen[h] {
+				return true
+			}
+			seen[h] = true
+			break
+		}
+	}
+	return false
+}
+
+func sameSource(a, b string) bool { return stripQuery(a) == stripQuery(b) }
 
 func fileHash(path string) (string, error) {
 	b, err := os.ReadFile(path)
@@ -189,13 +242,15 @@ func (c *Client) sharedCovers() map[string]bool {
 	return out
 }
 
-// isGalleryShot reports whether a filename is "<id>_<n>.<ext>" rather than a
-// cover. Item ids themselves contain underscores ("01_5027"), so only a
-// trailing "_<digits>" beyond the id counts.
+// isGalleryShot reports whether a filename belongs to a gallery rather than
+// being an item's cover.
+//
+// Gallery files are "<id>_<n>.<ext>". Item ids themselves contain underscores
+// ("01_5027"), so the "01" prefix has to be excluded.
 func isGalleryShot(name string) bool {
 	base := strings.TrimSuffix(name, filepath.Ext(name))
 	i := strings.LastIndex(base, "_")
-	if i < 0 {
+	if i < 0 || base[:i] == "01" {
 		return false
 	}
 	tail := base[i+1:]
@@ -207,8 +262,7 @@ func isGalleryShot(name string) bool {
 			return false
 		}
 	}
-	// "01_5027" is a cover: the part before the underscore is the "01" prefix.
-	return base[:i] != "01"
+	return true
 }
 
 // coverIsPlaceholder reports whether the stored cover for id is one of the

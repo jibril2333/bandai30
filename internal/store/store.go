@@ -69,6 +69,13 @@ func Open(path string) (*Store, error) {
 
 // migrate applies idempotent schema tweaks for databases created by older versions.
 func (s *Store) migrate(ctx context.Context) error {
+	// item_photos.src records where each shot came from; without it a
+	// reordered source list leaves stale files in place.
+	if !s.columnExists(ctx, "item_photos", "src") {
+		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE item_photos ADD COLUMN src TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
 	// collections.type was added after the initial release.
 	if !s.columnExists(ctx, "collections", "type") {
 		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE collections ADD COLUMN type TEXT NOT NULL DEFAULT 'kit'`); err != nil {
@@ -157,7 +164,7 @@ func (s *Store) UpsertCatalog(ctx context.Context, it *Item) error {
 // SetItemPhotos replaces an item's gallery in one transaction. Passing an
 // empty slice is a no-op rather than a wipe: a detail page that failed to
 // parse should leave the pictures we already have alone.
-func (s *Store) SetItemPhotos(ctx context.Context, itemID string, urls []string) error {
+func (s *Store) SetItemPhotos(ctx context.Context, itemID string, urls, srcs []string) error {
 	if len(urls) == 0 {
 		return nil
 	}
@@ -170,8 +177,12 @@ func (s *Store) SetItemPhotos(ctx context.Context, itemID string, urls []string)
 		return err
 	}
 	for i, u := range urls {
+		src := ""
+		if i < len(srcs) {
+			src = srcs[i]
+		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO item_photos(item_id, idx, url) VALUES(?,?,?)`, itemID, i, u); err != nil {
+			`INSERT INTO item_photos(item_id, idx, url, src) VALUES(?,?,?,?)`, itemID, i, u, src); err != nil {
 			return err
 		}
 	}
@@ -193,6 +204,26 @@ func (s *Store) ItemPhotos(ctx context.Context, itemID string) ([]string, error)
 			return nil, err
 		}
 		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// ItemPhotoSources returns the remote URL each gallery slot was fetched from,
+// in slot order. Rows written before sources were recorded yield "".
+func (s *Store) ItemPhotoSources(ctx context.Context, itemID string) ([]string, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT src FROM item_photos WHERE item_id=? ORDER BY idx`, itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
 	}
 	return out, rows.Err()
 }

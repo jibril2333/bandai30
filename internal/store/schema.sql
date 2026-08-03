@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS item_photos (
     item_id TEXT NOT NULL,
     idx     INTEGER NOT NULL,   -- display order within the gallery
     url     TEXT NOT NULL,      -- local path, e.g. /photos/01_5027_2.jpg
+    src     TEXT NOT NULL DEFAULT '', -- remote URL it came from, minus signature
     PRIMARY KEY (item_id, idx),
     FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
 );

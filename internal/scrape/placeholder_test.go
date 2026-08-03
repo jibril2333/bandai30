@@ -19,6 +19,7 @@ func TestIsGalleryShot(t *testing.T) {
 		"01_5027_12.jpg",
 		"tw-14624_3.jpg",
 		"pb-1000185584_2.jpg",
+		"tw-15862_4.webp",
 	}
 	for _, n := range covers {
 		if isGalleryShot(n) {
