@@ -133,6 +133,9 @@ func (c *Client) scrapeTamashii(ctx context.Context, brandCode, series string) (
 			continue
 		}
 		rep.Upserted++
+		if d := diffItem(existing, &it); d != "" {
+			rep.Changes = append(rep.Changes, d)
+		}
 		if existing == nil {
 			rep.NewItems = append(rep.NewItems, r.title)
 		}

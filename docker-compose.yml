@@ -39,6 +39,9 @@ services:
       BANDAI30_SCRAPE_INTERVAL: "168h"
       BANDAI30_FULL_INTERVAL: "720h"
       BANDAI30_NTFY_TOPIC: ${BANDAI30_NTFY_TOPIC:-}
+      # Only needed for a reserved/protected topic. Injected from a repo secret
+      # like the topic itself — neither belongs in git.
+      BANDAI30_NTFY_TOKEN: ${BANDAI30_NTFY_TOKEN:-}
       TZ: Asia/Tokyo
     volumes:
       # The real SQLite DB + ~600 scraped photos, persisted across rebuilds.

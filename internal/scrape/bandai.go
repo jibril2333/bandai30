@@ -64,6 +64,7 @@ type Report struct {
 	Upserted   int      `json:"upserted"`
 	NewPhotos  int      `json:"newPhotos"`
 	NewItems   []string `json:"newItems,omitempty"` // titles of items not previously in the DB
+	Changes    []string `json:"changes,omitempty"`  // existing items whose price/date/name moved
 	Failures   []string `json:"failures,omitempty"`
 }
 
@@ -180,6 +181,9 @@ func (c *Client) scrapePage(ctx context.Context, brand, series string, page int,
 			continue
 		}
 		rep.Upserted++
+		if d := diffItem(existing, &it); d != "" {
+			rep.Changes = append(rep.Changes, d)
+		}
 		// UpsertCatalog keeps an existing photo_url, so a replacement has to be
 		// written explicitly. The cache-busting suffix matters: the file keeps
 		// its name, and browsers cache photos by URL.

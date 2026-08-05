@@ -58,6 +58,7 @@ jobs:
         # booting on an empty database.
         env:
           BANDAI30_NTFY_TOPIC: ${{ secrets.BANDAI30_NTFY_TOPIC }}
+          BANDAI30_NTFY_TOKEN: ${{ secrets.BANDAI30_NTFY_TOKEN }}
           BANDAI30_DATA_DIR: /Users/rei/bandai30/data
         run: |
           if [ ! -s "$BANDAI30_DATA_DIR/bandai30.db" ]; then

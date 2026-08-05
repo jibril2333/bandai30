@@ -167,7 +167,7 @@ func main() {
 	}
 
 	scraper := scrape.New(st, photosDir)
-	notifier := notify.New(os.Getenv("BANDAI30_NTFY_SERVER"), os.Getenv("BANDAI30_NTFY_TOPIC"))
+	notifier := notify.New(os.Getenv("BANDAI30_NTFY_SERVER"), os.Getenv("BANDAI30_NTFY_TOPIC"), os.Getenv("BANDAI30_NTFY_TOKEN"))
 	// The environment only seeds the defaults; once the owner saves anything on
 	// the settings page, the database wins. That matters here because the
 	// container is recreated on every deploy.
@@ -379,26 +379,15 @@ func scheduledScrape(ctx context.Context, st *store.Store, scraper *scrape.Clien
 			}
 		}
 
-		fresh, err := scraper.Run(ctx, "", "auto", mode)
-		if err != nil {
+		if _, err := scraper.Run(ctx, "", "auto", mode); err != nil {
 			// Busy means a manual refresh is in flight; it covers the same
 			// ground, so skip this tick rather than queueing behind it.
 			log.Printf("auto-scrape: %v", err)
 			continue
 		}
-		if len(fresh) > 0 {
-			log.Printf("auto-scrape: %d new item(s)", len(fresh))
-			body := strings.Join(fresh, "\n")
-			if len(fresh) > 20 {
-				body = strings.Join(fresh[:20], "\n") + "\n…"
-			}
-			title := fmt.Sprintf("Bandai30: %d new item(s)", len(fresh))
-			if err := notifier.Send(ctx, title, body, "new,robot"); err != nil {
-				log.Printf("auto-scrape: ntfy send: %v", err)
-			}
-		} else {
-			log.Print("auto-scrape: no new items")
-		}
+		st := scraper.State()
+		log.Printf("auto-scrape: %d new, %d changed", len(st.NewItems), len(st.Changes))
+		notifyScrape(ctx, notifier, st)
 	}
 }
 
@@ -453,6 +442,50 @@ func scheduledBackup(ctx context.Context, st *store.Store, dir string, notifier 
 		n, _ := store.PruneBackups(dir, cfg.BackupKeep)
 		log.Printf("backup: wrote %s (pruned %d old)", filepath.Base(path), n)
 	}
+}
+
+// notifyScrape pushes one message covering what the run found.
+//
+// Changes matter as much as new arrivals: a price rise or a release slipping a
+// quarter is the news for something already on the wishlist, and until now
+// those edits were applied silently.
+func notifyScrape(ctx context.Context, notifier *notify.Ntfy, st scrape.RunState) {
+	if len(st.NewItems) == 0 && len(st.Changes) == 0 {
+		return
+	}
+	var head []string
+	if n := len(st.NewItems); n > 0 {
+		head = append(head, fmt.Sprintf("%d 个新品", n))
+	}
+	if n := len(st.Changes); n > 0 {
+		head = append(head, fmt.Sprintf("%d 项变更", n))
+	}
+
+	var body []string
+	if len(st.NewItems) > 0 {
+		body = append(body, "【新品】")
+		body = append(body, capped(st.NewItems, 10)...)
+	}
+	if len(st.Changes) > 0 {
+		if len(body) > 0 {
+			body = append(body, "")
+		}
+		body = append(body, "【变更】")
+		body = append(body, capped(st.Changes, 10)...)
+	}
+	if err := notifier.Send(ctx, "Bandai30: "+strings.Join(head, " · "),
+		strings.Join(body, "\n"), "new,robot"); err != nil {
+		log.Printf("auto-scrape: ntfy send: %v", err)
+	}
+}
+
+// capped keeps a push notification readable; the full list is in the app.
+func capped(list []string, n int) []string {
+	if len(list) <= n {
+		return list
+	}
+	return append(append([]string{}, list[:n]...),
+		fmt.Sprintf("…还有 %d 条", len(list)-n))
 }
 
 func reapSessions(ctx context.Context, st *store.Store) {

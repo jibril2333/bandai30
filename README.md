@@ -66,6 +66,26 @@ back, rather than being skipped.
 The run time is recorded *before* scraping, so a week of failing sources
 retries next week instead of hammering Bandai in a hot loop.
 
+### What gets pushed
+
+An automatic run sends one ntfy message covering both new arrivals **and edits
+to items already in the catalogue** — Bandai revises prices and slips release
+months after announcing a product, and for something on the wishlist or already
+ordered that is the news. Price, release date and name are compared; category
+is derived from the name so it would only echo a rename, and photos change far
+too often to be worth a ping.
+
+A blank incoming value is never reported as a change: the catalogue
+occasionally serves an empty field, and `UpsertCatalog` keeps the old value in
+that case, so "¥2200 → nothing" would describe something that did not happen.
+
+Manual refreshes stay silent — the result is already on screen.
+
+`BANDAI30_NTFY_TOKEN` is only needed for a reserved or self-hosted topic; a
+plain ntfy.sh topic needs none. Publishing uses ntfy's JSON API rather than its
+header form, because titles here contain Japanese and Chinese and HTTP headers
+are latin-1 only.
+
 ### Full vs incremental
 
 A refresh comes in two sizes, because their costs differ by two orders of

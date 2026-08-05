@@ -54,6 +54,7 @@ type RunState struct {
 	ItemsAll  int    `json:"itemsAll"`  // items to process in this phase
 
 	NewItems   []string `json:"newItems"`   // "<code> · <name>"
+	Changes    []string `json:"changes"`    // existing items whose price/date/name moved
 	Failures   []string `json:"failures"`   // per-collection errors, run continues
 	StartedAt  int64    `json:"startedAt"`  // unix seconds
 	FinishedAt int64    `json:"finishedAt"` // unix seconds, 0 while running
@@ -66,6 +67,7 @@ func (c *Client) State() RunState {
 	defer c.mu.Unlock()
 	s := c.state
 	s.NewItems = append([]string(nil), c.state.NewItems...)
+	s.Changes = append([]string(nil), c.state.Changes...)
 	s.Failures = append([]string(nil), c.state.Failures...)
 	return s
 }
@@ -180,6 +182,11 @@ func (c *Client) run(ctx context.Context, scope, trigger string, mode Mode) ([]s
 		// download, an upsert that failed. They must reach the UI: without
 		// this the run reports "no failures" while items silently end up
 		// with no picture.
+		var moved []string
+		for _, ch := range rep.Changes {
+			moved = append(moved, col.Code+" · "+ch)
+		}
+
 		var failed []string
 		for _, f := range rep.Failures {
 			failed = append(failed, col.Code+": "+f)
@@ -190,6 +197,7 @@ func (c *Client) run(ctx context.Context, scope, trigger string, mode Mode) ([]s
 
 		c.mu.Lock()
 		c.state.NewItems = append(c.state.NewItems, got...)
+		c.state.Changes = append(c.state.Changes, moved...)
 		c.state.Failures = append(c.state.Failures, failed...)
 		c.state.Completed++
 		c.mu.Unlock()
