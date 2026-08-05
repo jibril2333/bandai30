@@ -57,6 +57,7 @@ jobs:
         # data dir has no real bandai30.db, the deploy aborts instead of
         # booting on an empty database.
         env:
+          BANDAI30_NTFY_SERVER: ${{ secrets.BANDAI30_NTFY_SERVER }}
           BANDAI30_NTFY_TOPIC: ${{ secrets.BANDAI30_NTFY_TOPIC }}
           BANDAI30_NTFY_TOKEN: ${{ secrets.BANDAI30_NTFY_TOKEN }}
           BANDAI30_DATA_DIR: /Users/rei/bandai30/data

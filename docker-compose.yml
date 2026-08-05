@@ -38,9 +38,11 @@ services:
       # values in the database, which survives this container being recreated.
       BANDAI30_SCRAPE_INTERVAL: "168h"
       BANDAI30_FULL_INTERVAL: "720h"
+      # Server, topic and token all arrive from repo secrets — the deployment
+      # publishes to a private self-hosted ntfy that rejects anonymous posts,
+      # so none of the three belongs in git. Empty server means ntfy.sh.
+      BANDAI30_NTFY_SERVER: ${BANDAI30_NTFY_SERVER:-}
       BANDAI30_NTFY_TOPIC: ${BANDAI30_NTFY_TOPIC:-}
-      # Only needed for a reserved/protected topic. Injected from a repo secret
-      # like the topic itself — neither belongs in git.
       BANDAI30_NTFY_TOKEN: ${BANDAI30_NTFY_TOKEN:-}
       TZ: Asia/Tokyo
     volumes:
