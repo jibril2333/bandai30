@@ -109,6 +109,13 @@ on every deploy, so anything kept only in the environment would revert.
 `BANDAI30_SCRAPE_INTERVAL` / `BANDAI30_FULL_INTERVAL` only seed the defaults
 for a fresh install.
 
+The cover is the gallery's first shot, not the listing thumbnail. The two are
+not always the same picture — 30MF リーベルフォートレス shows loose runner
+parts on its card and the assembled model on its detail page — and the detail
+page is also the larger image now that listings serve 450px. Items with no
+readable detail page (Premium Bandai) keep their listing thumbnail, and a photo
+the owner uploaded is never replaced.
+
 The full pass also repairs **placeholder covers**. Bandai serves a brand logo
 for products announced before their photos are shot; since a cover is only
 fetched when an item has none, that logo used to stick forever. A cover that is

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -144,7 +145,13 @@ func (c *Client) scrapePage(ctx context.Context, brand, series string, page int,
 		// A cover shared with other items is a brand-logo placeholder, not a
 		// photo of this product: forget it so the code below fetches again,
 		// which picks up the real shot as soon as Bandai publishes one.
-		replacing := it.PhotoURL != "" && c.coverIsPlaceholder(shared, itemID)
+		//
+		// Only applies to the listing-derived cover. Once a detail-page shot has
+		// been promoted (adoptGalleryCover), it came from the product's own
+		// gallery and cannot be a brand logo — re-deriving it from the listing
+		// would undo the promotion on every run.
+		fromListing := it.PhotoURL == "" || isScrapedCover(it.PhotoURL, itemID) && !isGalleryShot(path.Base(stripQuery(it.PhotoURL)))
+		replacing := it.PhotoURL != "" && fromListing && c.coverIsPlaceholder(shared, itemID)
 		if replacing {
 			it.PhotoURL = ""
 		}

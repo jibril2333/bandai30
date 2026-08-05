@@ -6,9 +6,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // A listing card carries one thumbnail. The detail page carries the whole
@@ -160,7 +162,47 @@ func (c *Client) FetchGallery(ctx context.Context, itemID string) (int, error) {
 	if err := c.Store.SetItemPhotos(ctx, itemID, local, srcsOut); err != nil {
 		return downloaded, err
 	}
+	if err := c.adoptGalleryCover(ctx, itemID, local); err != nil {
+		return downloaded, err
+	}
 	return downloaded, nil
+}
+
+// adoptGalleryCover promotes the gallery's first shot to be the item's cover.
+//
+// The listing thumbnail and the detail page do not always show the same thing:
+// for 30MF リーベルフォートレス the card is a runner shot of loose parts while
+// the detail page leads with the assembled model. The detail page is the
+// better picture, and it is bigger — the listing now serves 450px thumbnails
+// where the detail page has 1500px.
+//
+// A photo the owner uploaded is never touched: scraped covers are named
+// "<item id>.<ext>", uploads "upload-<date>-<id>.<ext>".
+func (c *Client) adoptGalleryCover(ctx context.Context, itemID string, gallery []string) error {
+	if len(gallery) == 0 {
+		return nil
+	}
+	it, err := c.Store.GetItem(ctx, itemID)
+	if err != nil || it == nil {
+		return err
+	}
+	if it.PhotoURL != "" && !isScrapedCover(it.PhotoURL, itemID) {
+		return nil // the owner's own photo
+	}
+	want := gallery[0]
+	if stripQuery(it.PhotoURL) == want {
+		return nil
+	}
+	// The query busts browser caches: covers are cached by URL, and the file
+	// this points at is a different one from before.
+	return c.Store.SetPhotoURL(ctx, itemID, fmt.Sprintf("%s?v=%d", want, time.Now().Unix()))
+}
+
+// isScrapedCover reports whether url is the cover this scraper downloaded,
+// rather than something the owner uploaded.
+func isScrapedCover(url, itemID string) bool {
+	base := path.Base(stripQuery(url))
+	return strings.HasPrefix(base, itemID+".") || isGalleryShot(base)
 }
 
 // --- placeholder covers ---
