@@ -898,14 +898,25 @@ async function loadGallery(id, cover) {
   // larger versions.
   //
   // A photo the OWNER uploaded is different: it isn't in the gallery at all,
-  // so it must still lead. Scraped covers are always "<item id>.<ext>";
-  // uploads are "upload-<date>-<id>.<ext>".
-  const file = (cover || '').split('?')[0].split('/').pop();
-  const ownUpload = !!cover && !file.startsWith(id + '.');
+  // so it must still lead. Everything this app scraped is named after the item
+  // — "<id>.<ext>" for a listing cover, "<id>_<n>.<ext>" for a gallery shot,
+  // and the cover is now usually the latter. Uploads are
+  // "upload-<date>-<id>.<ext>" and match neither.
+  const bare = u => (u || '').split('?')[0].split('/').pop();
+  const file = bare(cover);
+  const ownUpload = !!cover && !file.startsWith(id + '.') && !file.startsWith(id + '_');
   galleryShots = shots.length ? shots.slice() : (cover ? [cover] : []);
-  if (ownUpload && !galleryShots.includes(cover)) galleryShots.unshift(cover);
+  // Compare without the cache-busting query, or the cover looks absent from a
+  // gallery it is in fact already the first entry of.
+  if (ownUpload && !galleryShots.some(u => bare(u) === file)) galleryShots.unshift(cover);
   const strip = $('v-thumbs');
-  if (galleryShots.length < 2) { strip.hidden = true; return; }
+  if (galleryShots.length < 2) {
+    // Clear as well as hide: leaving the previous item's markup in place is
+    // one CSS rule away from showing it.
+    strip.innerHTML = '';
+    strip.hidden = true;
+    return;
+  }
   strip.innerHTML = galleryShots.map((u, i) =>
     `<button class="vthumb${i === 0 ? ' active' : ''}" data-i="${i}" aria-label="第 ${i + 1} 张">
        <img src="${escapeAttr(u)}" loading="lazy" alt=""></button>`).join('');

@@ -390,6 +390,9 @@ a.metric:hover { border-color: var(--primary); }
 .view-photo.noimg { aspect-ratio: auto; height: 130px; color: var(--text-dim); font-size: 13px; }
 
 /* --- detail gallery --- */
+/* [hidden] must beat the display below, or an item with no gallery keeps
+   showing the previous item's strip. */
+.view-thumbs[hidden] { display: none; }
 .view-thumbs {
   display: flex; gap: 6px; margin-top: 8px;
   overflow-x: auto; padding-bottom: 4px;
