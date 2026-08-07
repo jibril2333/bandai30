@@ -56,6 +56,19 @@ CREATE TABLE IF NOT EXISTS item_photos (
     FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
 );
 
+-- Photos the owner took, kept in a separate table from item_photos on purpose:
+-- a scrape replaces an item's whole gallery, so anything of theirs stored
+-- there would be wiped on the next refresh. These are irreplaceable.
+CREATE TABLE IF NOT EXISTS user_photos (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id  TEXT NOT NULL,
+    url      TEXT NOT NULL,      -- local path under /photos/
+    caption  TEXT NOT NULL DEFAULT '',
+    added_at INTEGER NOT NULL,
+    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_user_photos_item ON user_photos(item_id, id);
+
 -- Small key/value bag for scheduler bookkeeping that must outlive the process
 -- (e.g. last_scrape_at — see the weekly refresh in cmd/bandai30).
 CREATE TABLE IF NOT EXISTS meta (

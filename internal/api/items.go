@@ -36,7 +36,23 @@ func (s *Server) listItems(w http.ResponseWriter, r *http.Request) {
 	if items == nil {
 		items = []store.Item{}
 	}
-	writeJSON(w, http.StatusOK, items)
+	// Which of these the owner has photographed themselves. One grouped count
+	// query for the whole page beats a join that would drag the photo rows
+	// along, and the list only needs the number.
+	counts, err := s.Store.UserPhotoCounts(ctxOf(r))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	type listItem struct {
+		store.Item
+		MyPhotos int `json:"myPhotos,omitempty"`
+	}
+	out := make([]listItem, len(items))
+	for i, it := range items {
+		out[i] = listItem{Item: it, MyPhotos: counts[it.ID]}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) getItem(w http.ResponseWriter, r *http.Request) {
@@ -57,10 +73,19 @@ func (s *Server) getItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	mine, err := s.Store.UserPhotos(ctxOf(r), id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if mine == nil {
+		mine = []store.UserPhoto{}
+	}
 	writeJSON(w, http.StatusOK, struct {
 		*store.Item
-		Photos []string `json:"photos"`
-	}{it, photos})
+		Photos     []string          `json:"photos"`
+		UserPhotos []store.UserPhoto `json:"userPhotos"`
+	}{it, photos, mine})
 }
 
 // createItem is disabled: the catalog is populated only by scraping official

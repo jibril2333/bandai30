@@ -146,6 +146,25 @@ Your own collection state (owned / wanted / building / finished, notes, Chinese
 names, uploaded photos) is yours alone and is never scraped — it lives only in
 your `data/` dir.
 
+## Your own photos
+
+Every item has a **我的照片** section holding pictures you took — the built
+model, the box on the shelf, a paint job. They lead the detail-page gallery,
+ahead of Bandai's press shots, and the grid marks the items you've
+photographed.
+
+They live in their own table, not in the scraped gallery, because a refresh
+replaces an item's gallery wholesale (`SetItemPhotos` deletes then re-inserts).
+Anything of yours kept there would disappear at the next scrape, and unlike a
+press shot it cannot be re-downloaded.
+
+Only paths this server stored are accepted — the upload endpoint's own
+`/photos/...`. A remote URL would leave the picture on someone else's host,
+free to vanish or change, which is the opposite of what "my photo" means.
+Deleting a photo drops the row but leaves the file: your cover may still point
+at it, and an orphaned image costs a few hundred KB where a broken cover is a
+visible bug.
+
 ## Backups
 
 The catalogue is reproducible; the collection is not. On 2026-07-31 the
@@ -230,6 +249,9 @@ itself.
 | `PUT  /api/items/{id}`            | update                         |
 | `DELETE /api/items/{id}`          |                                |
 | `POST /api/upload`                | multipart file → photo URL     |
+| `GET  /api/items/{id}/photos`     | the owner's own photos         |
+| `POST /api/items/{id}/photos`     | attach one (uploaded path only)|
+| `DELETE /api/items/{id}/photos/{photoID}` | detach one             |
 | `POST /api/scrape`                | start a refresh of everything  |
 | `POST /api/scrape/{slug}`         | start a refresh of one line    |
 | `GET  /api/scrape/status`         | progress of the current run    |

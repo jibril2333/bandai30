@@ -83,6 +83,10 @@ const api = {
     (mode === 'full' ? '?mode=full' : ''), { method: 'POST' }),
   scrapeStatus: () => api.fetch('/api/scrape/status'),
   item: (id) => api.fetch(`/api/items/${encodeURIComponent(id)}`),
+  addUserPhoto: (id, url, caption) => api.fetch(`/api/items/${encodeURIComponent(id)}/photos`,
+    { method: 'POST', body: { url, caption: caption || '' } }),
+  delUserPhoto: (id, pid) => api.fetch(`/api/items/${encodeURIComponent(id)}/photos/${pid}`,
+    { method: 'DELETE' }),
   settings: () => api.fetch('/api/settings'),
   saveSettings: (s) => api.fetch('/api/settings', { method: 'PUT', body: s }),
   backups: () => api.fetch('/api/backups'),
@@ -804,6 +808,7 @@ function cardHTML(m, type, today) {
         ${m.photoUrl ? `<img src="${escapeAttr(m.photoUrl)}" loading="lazy" onerror="this.style.display='none';this.parentElement.classList.add('noimg')">` : ''}
         ${m.status !== 'none' ? `<span class="status-chip s-${m.status}">${statusLabel(m.status, type)}</span>` : ''}
         ${upcoming ? '<span class="soon-chip">未发售</span>' : ''}
+        ${m.myPhotos ? `<span class="mine-chip" title="我拍的照片 ${m.myPhotos} 张">📷 ${m.myPhotos}</span>` : ''}
       </div>
       <div class="card-body">
         <div class="name">${escapeHtml(m.name || m.nameZh || '(未命名)')}</div>
@@ -882,13 +887,20 @@ function openView(id) {
 
 // ---------- 详情页图库 ----------
 let galleryShots = [];
+let myPhotos = [];
 
 async function loadGallery(id, cover) {
   let shots = [];
   try {
-    shots = (await api.item(id)).photos || [];
+    const it = await api.item(id);
+    shots = it.photos || [];
+    myPhotos = it.userPhotos || [];
   } catch { return; }
   if (state.viewingId !== id) return;   // user moved on while we fetched
+
+  // The owner's own photos lead: a built model is what you actually came to
+  // look at, and the official shots are one tap away.
+  const mine = myPhotos.map(p => p.url);
 
   // The cover and the gallery's first shot are the same photograph from two
   // places: the cover comes off the listing card, the gallery off the detail
@@ -897,18 +909,20 @@ async function loadGallery(id, cover) {
   // front. When a gallery exists it supersedes the cover, and it carries the
   // larger versions.
   //
-  // A photo the OWNER uploaded is different: it isn't in the gallery at all,
-  // so it must still lead. Everything this app scraped is named after the item
-  // — "<id>.<ext>" for a listing cover, "<id>_<n>.<ext>" for a gallery shot,
-  // and the cover is now usually the latter. Uploads are
-  // "upload-<date>-<id>.<ext>" and match neither.
+  // A cover the OWNER set is different: it isn't in the gallery, so it must
+  // still appear. Everything this app scraped is named after the item —
+  // "<id>.<ext>" or "<id>_<n>.<ext>"; uploads are "upload-<date>-<id>.<ext>".
   const bare = u => (u || '').split('?')[0].split('/').pop();
   const file = bare(cover);
-  const ownUpload = !!cover && !file.startsWith(id + '.') && !file.startsWith(id + '_');
-  galleryShots = shots.length ? shots.slice() : (cover ? [cover] : []);
-  // Compare without the cache-busting query, or the cover looks absent from a
-  // gallery it is in fact already the first entry of.
-  if (ownUpload && !galleryShots.some(u => bare(u) === file)) galleryShots.unshift(cover);
+  const ownCover = !!cover && !file.startsWith(id + '.') && !file.startsWith(id + '_');
+  const official = shots.length ? shots.slice() : (cover ? [cover] : []);
+  if (ownCover && !official.some(u => bare(u) === file) && !mine.some(u => bare(u) === file)) {
+    official.unshift(cover);
+  }
+  galleryShots = mine.concat(official);
+
+  renderMyPhotos(id);
+
   const strip = $('v-thumbs');
   if (galleryShots.length < 2) {
     // Clear as well as hide: leaving the previous item's markup in place is
@@ -918,12 +932,71 @@ async function loadGallery(id, cover) {
     return;
   }
   strip.innerHTML = galleryShots.map((u, i) =>
-    `<button class="vthumb${i === 0 ? ' active' : ''}" data-i="${i}" aria-label="第 ${i + 1} 张">
+    `<button class="vthumb${i === 0 ? ' active' : ''}${i < mine.length ? ' vmine' : ''}" data-i="${i}" aria-label="第 ${i + 1} 张">
        <img src="${escapeAttr(u)}" loading="lazy" alt=""></button>`).join('');
   strip.hidden = false;
   strip.querySelectorAll('.vthumb').forEach(b => {
     b.onclick = () => showShot(+b.dataset.i);
   });
+  if (galleryShots.length) showShot(0);
+}
+
+// ---------- 我的照片 ----------
+function renderMyPhotos(id) {
+  const box = $('v-myphotos');
+  if (!box) return;
+  box.innerHTML = `
+    <div class="view-section-label">我的照片 ${myPhotos.length ? `<span class="mp-count">${myPhotos.length}</span>` : ''}</div>
+    <div class="mp-list">
+      ${myPhotos.map(p => `
+        <div class="mp-item" data-pid="${p.id}">
+          <img src="${escapeAttr(p.url)}" loading="lazy" alt="">
+          <button class="mp-del" data-pid="${p.id}" aria-label="删除">×</button>
+        </div>`).join('')}
+      <button class="mp-add" id="mp-add" aria-label="添加照片">＋</button>
+    </div>
+    <input type="file" id="mp-file" accept="image/*" multiple hidden>
+    <div class="mp-state" id="mp-state"></div>`;
+
+  const file = $('mp-file');
+  $('mp-add').onclick = () => file.click();
+  file.onchange = async () => {
+    const st = $('mp-state');
+    const files = [...file.files];
+    file.value = '';
+    for (let i = 0; i < files.length; i++) {
+      st.textContent = files.length > 1 ? `上传中 ${i + 1}/${files.length}…` : '上传中…';
+      try {
+        const up = await api.upload(files[i]);
+        const p = await api.addUserPhoto(id, up.url, '');
+        myPhotos.push(p);
+      } catch (e) {
+        st.textContent = '失败: ' + e.message;
+        return;
+      }
+    }
+    st.textContent = '';
+    if (state.viewingId === id) loadGallery(id, currentCover(id));
+  };
+  box.querySelectorAll('.mp-del').forEach(b => {
+    b.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm('删除这张照片？')) return;
+      try {
+        await api.delUserPhoto(id, b.dataset.pid);
+        myPhotos = myPhotos.filter(p => String(p.id) !== String(b.dataset.pid));
+        if (state.viewingId === id) loadGallery(id, currentCover(id));
+      } catch (e2) { $('mp-state').textContent = '失败: ' + e2.message; }
+    };
+  });
+  box.querySelectorAll('.mp-item img').forEach((im, i) => {
+    im.onclick = () => showShot(i);
+  });
+}
+
+function currentCover(id) {
+  const m = state.items.find(x => x.id === id);
+  return m ? m.photoUrl : '';
 }
 
 function showShot(i) {
