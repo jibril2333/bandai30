@@ -22,13 +22,27 @@ type Settings struct {
 	BackupInterval string `json:"backupInterval"`
 	// BackupKeep is how many snapshots to retain. They are ~300 KB each.
 	BackupKeep int `json:"backupKeep"`
+
+	// ntfy push. These used to arrive from the environment, which meant the
+	// container had to be recreated to change a topic — and after the move to
+	// the NAS, where CI no longer touches the host, changing one meant editing
+	// YAML on the box. They live here for the same reason the intervals do.
+	//
+	// NtfyToken never leaves the server: the API reports whether one is set,
+	// not what it is.
+	NtfyServer string `json:"ntfyServer"`
+	NtfyTopic  string `json:"ntfyTopic"`
+	NtfyToken  string `json:"-"`
 }
 
 const (
-	keyAutoInterval = "auto_interval"
+	keyAutoInterval   = "auto_interval"
 	keyFullInterval   = "full_interval"
 	keyBackupInterval = "backup_interval"
 	keyBackupKeep     = "backup_keep"
+	keyNtfyServer     = "ntfy_server"
+	keyNtfyTopic      = "ntfy_topic"
+	keyNtfyToken      = "ntfy_token"
 
 	// defaultBackupInterval/Keep apply when nothing was ever configured: daily,
 	// a fortnight of history. At ~300 KB a snapshot that is ~4 MB total.
@@ -71,6 +85,22 @@ func (s *Store) GetSettings(ctx context.Context, defInterval, defFull string) (S
 			out.BackupKeep = n
 		}
 	}
+	// No "off" sentinel for these: an empty topic already means "don't push",
+	// so there is nothing a default would override.
+	for _, f := range []struct {
+		key string
+		dst *string
+	}{
+		{keyNtfyServer, &out.NtfyServer},
+		{keyNtfyTopic, &out.NtfyTopic},
+		{keyNtfyToken, &out.NtfyToken},
+	} {
+		v, err := s.GetMeta(ctx, f.key)
+		if err != nil {
+			return out, err
+		}
+		*f.dst = v
+	}
 	return out, nil
 }
 
@@ -92,7 +122,16 @@ func (s *Store) SaveSettings(ctx context.Context, in Settings) error {
 	if err := s.SetMeta(ctx, keyBackupInterval, blank(in.BackupInterval)); err != nil {
 		return err
 	}
-	return s.SetMeta(ctx, keyBackupKeep, strconv.Itoa(in.BackupKeep))
+	if err := s.SetMeta(ctx, keyBackupKeep, strconv.Itoa(in.BackupKeep)); err != nil {
+		return err
+	}
+	if err := s.SetMeta(ctx, keyNtfyServer, in.NtfyServer); err != nil {
+		return err
+	}
+	if err := s.SetMeta(ctx, keyNtfyTopic, in.NtfyTopic); err != nil {
+		return err
+	}
+	return s.SetMeta(ctx, keyNtfyToken, in.NtfyToken)
 }
 
 func parseInterval(v string) time.Duration {

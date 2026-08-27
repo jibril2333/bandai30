@@ -81,10 +81,18 @@ that case, so "¥2200 → nothing" would describe something that did not happen.
 
 Manual refreshes stay silent — the result is already on screen.
 
-`BANDAI30_NTFY_TOKEN` is only needed for a reserved or self-hosted topic; a
-plain ntfy.sh topic needs none. Publishing uses ntfy's JSON API rather than its
-header form, because titles here contain Japanese and Chinese and HTTP headers
-are latin-1 only.
+Topic, server and token are configured on the **settings page**, not in the
+environment, and live in the database like the schedules do. On the Mac they
+came from repo secrets that the deploy workflow injected; once this moved to a
+NAS that CI never touches, an environment variable would have meant editing
+YAML on the box to change a topic. A token is only needed for a reserved or
+self-hosted topic.
+
+The settings page has a **发送测试** button, because the alternative way to
+learn that a token is wrong is to not receive the one notification you wanted,
+with the error sitting in a container log. Publishing uses ntfy's JSON API
+rather than its header form: titles here contain Japanese and Chinese, and HTTP
+headers are latin-1 only.
 
 ### Full vs incremental
 
@@ -212,7 +220,6 @@ Config via environment (see `.env.example`):
 | `BANDAI30_NO_AUTH` | `1` disables app login — only safe behind a trusted network layer |
 | `BANDAI30_ADMIN_USER` / `_PASS` | first-run admin, created when the users table is empty |
 | `BANDAI30_SCRAPE_INTERVAL` | e.g. `168h` (weekly); **unset means no automatic refresh ever** |
-| `BANDAI30_NTFY_TOPIC` | ntfy.sh topic for "new item" push notifications |
 | `BANDAI30_DATA_DIR` | host path to bind-mount; must be absolute when compose runs from elsewhere |
 
 ## Deploying to the NAS
@@ -304,6 +311,9 @@ itself.
 | `POST /api/import`                | restore JSON                   |
 | `GET  /photos/{name}`             | gated; served from disk        |
 | `GET  /api/health`                | **no session required** — `{ok, version}` |
+| `GET  /api/settings`              | schedules + ntfy; never returns the token |
+| `PUT  /api/settings`              | omit `ntfyToken` to keep the stored one   |
+| `POST /api/settings/ntfy-test`    | send one notification with stored config  |
 
 ## Data layout
 

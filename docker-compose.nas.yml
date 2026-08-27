@@ -50,13 +50,6 @@ services:
       # — which watchtower does on every new build.
       BANDAI30_SCRAPE_INTERVAL: "168h"
       BANDAI30_FULL_INTERVAL: "720h"
-      # These used to arrive from GitHub secrets, injected by the Mac's deploy
-      # workflow at `docker compose up` time. That path is gone: CI no longer
-      # touches this machine, so runtime configuration lives HERE, in the app's
-      # YAML in the TrueNAS UI. Empty server means ntfy.sh.
-      BANDAI30_NTFY_SERVER: "${BANDAI30_NTFY_SERVER:-}"
-      BANDAI30_NTFY_TOPIC: "${BANDAI30_NTFY_TOPIC:-}"
-      BANDAI30_NTFY_TOKEN: "${BANDAI30_NTFY_TOKEN:-}"
       TZ: "${BANDAI30_TZ:-Asia/Tokyo}"
     healthcheck:
       # /api/health reads from SQLite before answering, so this reports

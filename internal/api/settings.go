@@ -3,9 +3,12 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/rei/bandai30/internal/notify"
 	"github.com/rei/bandai30/internal/store"
 )
 
@@ -13,12 +16,15 @@ import (
 // the read-only schedule state that makes them meaningful.
 type settingsView struct {
 	store.Settings
-	LastRun     int64 `json:"lastRun"`     // last incremental (or full), 0 = never
-	NextRun     int64 `json:"nextRun"`     // 0 = disabled
-	LastFullRun int64 `json:"lastFullRun"` // 0 = never
-	NextFullRun int64 `json:"nextFullRun"` // 0 = disabled
-	LastBackup  int64 `json:"lastBackup"`  // 0 = never
-	NextBackup  int64 `json:"nextBackup"`  // 0 = disabled
+	// Whether a token is stored, never the token itself. The settings page has
+	// no reason to see it, and this endpoint is served over a tunnel.
+	NtfyTokenSet bool  `json:"ntfyTokenSet"`
+	LastRun      int64 `json:"lastRun"`     // last incremental (or full), 0 = never
+	NextRun      int64 `json:"nextRun"`     // 0 = disabled
+	LastFullRun  int64 `json:"lastFullRun"` // 0 = never
+	NextFullRun  int64 `json:"nextFullRun"` // 0 = disabled
+	LastBackup   int64 `json:"lastBackup"`  // 0 = never
+	NextBackup   int64 `json:"nextBackup"`  // 0 = disabled
 }
 
 func (s *Server) envDefaults() (interval, full string) {
@@ -33,7 +39,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	out := settingsView{Settings: cfg}
+	out := settingsView{Settings: cfg, NtfyTokenSet: cfg.NtfyToken != ""}
 	if last, err := s.Store.GetMetaTime(ctx, "last_scrape_at"); err == nil && !last.IsZero() {
 		out.LastRun = last.Unix()
 		if d := cfg.Interval(); d > 0 {
@@ -55,11 +61,51 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// settingsInput mirrors store.Settings except for the token, which is a
+// pointer so three cases stay distinguishable: absent (leave the stored one
+// alone — the page never receives it, so it cannot echo it back), empty
+// string (clear it), and a value (replace it).
+type settingsInput struct {
+	AutoInterval   string  `json:"autoInterval"`
+	FullInterval   string  `json:"fullInterval"`
+	BackupInterval string  `json:"backupInterval"`
+	BackupKeep     int     `json:"backupKeep"`
+	NtfyServer     string  `json:"ntfyServer"`
+	NtfyTopic      string  `json:"ntfyTopic"`
+	NtfyToken      *string `json:"ntfyToken"`
+}
+
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
-	var in store.Settings
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	var raw settingsInput
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid json: "+err.Error())
 		return
+	}
+	in := store.Settings{
+		AutoInterval:   raw.AutoInterval,
+		FullInterval:   raw.FullInterval,
+		BackupInterval: raw.BackupInterval,
+		BackupKeep:     raw.BackupKeep,
+		NtfyServer:     strings.TrimSpace(raw.NtfyServer),
+		NtfyTopic:      strings.TrimSpace(raw.NtfyTopic),
+	}
+	// Carry the stored token forward unless this request names one.
+	cur, err := s.Store.GetSettings(ctxOf(r), "", "")
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if raw.NtfyToken != nil {
+		in.NtfyToken = strings.TrimSpace(*raw.NtfyToken)
+	} else {
+		in.NtfyToken = cur.NtfyToken
+	}
+	if in.NtfyServer != "" {
+		u, err := url.Parse(in.NtfyServer)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			writeErr(w, http.StatusBadRequest, "ntfyServer must be an http(s) URL, e.g. https://ntfy.sh")
+			return
+		}
 	}
 	// Validate here rather than letting a typo silently disable the scheduler.
 	for name, v := range map[string]string{
@@ -84,4 +130,27 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.getSettings(w, r)
+}
+
+// testNtfy sends one notification with the settings as they are stored right
+// now. Without it a wrong token is only discovered the next time something
+// worth announcing happens — which is exactly when you want the notification,
+// and the failure would sit in a container log nobody reads. Send() checks the
+// response status, so a rejected token surfaces here as an error.
+func (s *Server) testNtfy(w http.ResponseWriter, r *http.Request) {
+	cfg, err := s.Store.GetSettings(ctxOf(r), "", "")
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if cfg.NtfyTopic == "" {
+		writeErr(w, http.StatusBadRequest, "先填主题再测试")
+		return
+	}
+	n := notify.New(cfg.NtfyServer, cfg.NtfyTopic, cfg.NtfyToken)
+	if err := n.Send(ctxOf(r), "Bandai30: 测试推送", "设置页发出的测试通知。收到这条就说明配置是对的。", "white_check_mark,robot"); err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

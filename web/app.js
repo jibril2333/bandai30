@@ -89,6 +89,7 @@ const api = {
     { method: 'DELETE' }),
   settings: () => api.fetch('/api/settings'),
   saveSettings: (s) => api.fetch('/api/settings', { method: 'PUT', body: s }),
+  testNtfy: () => api.fetch('/api/settings/ntfy-test', { method: 'POST' }),
   backups: () => api.fetch('/api/backups'),
   runBackup: () => api.fetch('/api/backups', { method: 'POST' }),
 };
@@ -411,6 +412,26 @@ async function renderSettings() {
 
     <div class="set-card">
       <div class="set-row">
+        <div class="set-label"><b>推送通知</b><small>抓到新品或改价时推到手机。留空主题即关闭</small></div>
+        <input id="s-ntfy-topic" type="text" placeholder="主题名" value="${escapeAttr(cfg.ntfyTopic || '')}">
+      </div>
+      <div class="set-row">
+        <div class="set-label"><b>服务器</b><small>留空用公共的 ntfy.sh</small></div>
+        <input id="s-ntfy-server" type="text" placeholder="https://ntfy.sh" value="${escapeAttr(cfg.ntfyServer || '')}">
+      </div>
+      <div class="set-row">
+        <div class="set-label"><b>令牌</b><small>${cfg.ntfyTokenSet ? '已设置。留空保持不变，填 <code>-</code> 可清除' : '自建服务器若拒绝匿名发布则需要'}</small></div>
+        <input id="s-ntfy-token" type="password" autocomplete="new-password" placeholder="${cfg.ntfyTokenSet ? '••••••••（保持不变）' : '可留空'}">
+      </div>
+      <div class="set-actions">
+        <span class="set-state" id="n-state"></span>
+        <button id="n-test">发送测试</button>
+        <button id="n-save" class="primary">保存</button>
+      </div>
+    </div>
+
+    <div class="set-card">
+      <div class="set-row">
         <div class="set-label"><b>自动备份</b><small>快照会先做完整性校验，不合格直接丢弃。每份约 300 KB</small></div>
         ${intervalSelect('s-backup', cfg.backupInterval)}
       </div>
@@ -430,6 +451,57 @@ async function renderSettings() {
       <div class="set-row backup-list" id="b-list">${backupListHTML(backups)}</div>
     </div>
   </div>`;
+
+  // Both save buttons persist the WHOLE page, not just their own card — the
+  // form is loaded from the server in one go, so the page is the unit of
+  // state and a partial write would need the API to merge field by field.
+  // The consequence to know: pressing either 保存 commits whatever is in the
+  // other card's inputs too, half-typed included. The separate buttons exist
+  // for feedback placement, and because 发送测试 has to save before it can
+  // test what is stored.
+  const saveNtfy = async () => {
+    const raw = $('s-ntfy-token').value;
+    const body = {
+      autoInterval: $('s-interval').value,
+      fullInterval: $('s-full').value,
+      backupInterval: $('s-backup').value,
+      backupKeep: Math.max(1, Math.min(365, +$('s-keep').value || 14)),
+      ntfyTopic: $('s-ntfy-topic').value.trim(),
+      ntfyServer: $('s-ntfy-server').value.trim(),
+    };
+    // Absent = leave the stored token alone; the page never receives it, so it
+    // cannot echo it back. A lone "-" is the way to ask for it to be cleared.
+    if (raw === '-') body.ntfyToken = '';
+    else if (raw !== '') body.ntfyToken = raw;
+    await api.saveSettings(body);
+    $('s-ntfy-token').value = '';
+  };
+
+  $('n-save').onclick = async () => {
+    const st = $('n-state');
+    st.textContent = '保存中…'; st.className = 'set-state';
+    try {
+      await saveNtfy();
+      st.textContent = '已保存 ✓'; st.className = 'set-state ok';
+      setTimeout(() => render(), 800);
+    } catch (e) {
+      st.textContent = '保存失败: ' + e.message; st.className = 'set-state err';
+    }
+  };
+
+  $('n-test').onclick = async () => {
+    const st = $('n-state');
+    // Save first: testing what's on screen rather than what's stored would
+    // pass on a token you never persisted.
+    st.textContent = '发送中…'; st.className = 'set-state';
+    try {
+      await saveNtfy();
+      await api.testNtfy();
+      st.textContent = '已发送，看手机 ✓'; st.className = 'set-state ok';
+    } catch (e) {
+      st.textContent = '失败: ' + e.message; st.className = 'set-state err';
+    }
+  };
 
   $('b-now').onclick = async () => {
     const st = $('b-state');
@@ -452,6 +524,8 @@ async function renderSettings() {
         fullInterval: $('s-full').value,
         backupInterval: $('s-backup').value,
         backupKeep: Math.max(1, Math.min(365, +$('s-keep').value || 14)),
+        ntfyTopic: $('s-ntfy-topic').value.trim(),
+        ntfyServer: $('s-ntfy-server').value.trim(),
       });
       st.textContent = '已保存 ✓'; st.className = 'set-state ok';
       setTimeout(() => render(), 800);   // refresh the "next run" line

@@ -171,7 +171,6 @@ func main() {
 	}
 
 	scraper := scrape.New(st, photosDir)
-	notifier := notify.New(os.Getenv("BANDAI30_NTFY_SERVER"), os.Getenv("BANDAI30_NTFY_TOPIC"), os.Getenv("BANDAI30_NTFY_TOKEN"))
 	// The environment only seeds the defaults; once the owner saves anything on
 	// the settings page, the database wins. That matters here because the
 	// container is recreated on every deploy.
@@ -179,7 +178,7 @@ func main() {
 	defFull := os.Getenv("BANDAI30_FULL_INTERVAL")
 	if cfg, err := st.GetSettings(ctx, defInterval, defFull); err == nil {
 		log.Printf("auto-scrape: incremental=%v full=%v (ntfy: %v)",
-			orOff(cfg.Interval()), orOff(cfg.Full()), notifier.Enabled())
+			orOff(cfg.Interval()), orOff(cfg.Full()), cfg.NtfyTopic != "")
 	}
 	// One goroutine for both, in sequence: the server starts listening
 	// immediately (a fresh install would otherwise block it for minutes), and
@@ -189,12 +188,12 @@ func main() {
 	// shouldn't have to configure a schedule to get any data at all.
 	go func() {
 		firstRunScrape(ctx, st, scraper)
-		scheduledScrape(ctx, st, scraper, notifier, defInterval, defFull)
+		scheduledScrape(ctx, st, scraper, defInterval, defFull)
 	}()
 	// Backups get their own goroutine on purpose: a scrape that hangs on a
 	// slow site must not be able to stop them, and they are the one thing
 	// standing between a corrupt file and losing the collection.
-	go scheduledBackup(ctx, st, filepath.Join(*dataDir, "backups"), notifier)
+	go scheduledBackup(ctx, st, filepath.Join(*dataDir, "backups"))
 
 	srv := &api.Server{
 		Store:     st,
@@ -315,7 +314,22 @@ const settleDelay = 2 * time.Minute
 // app redeployed by git push and the host sleeping, a week-long timer could
 // keep getting reset and never fire. Persisting also means a run missed while
 // the machine was off happens shortly after it returns.
-func scheduledScrape(ctx context.Context, st *store.Store, scraper *scrape.Client, notifier *notify.Ntfy, defInterval, defFull string) {
+// ntfyNow builds a publisher from the CURRENT settings.
+//
+// Resolved per send rather than captured at startup, because the settings page
+// can change the topic or token at any moment and these goroutines outlive any
+// single edit. An unreadable settings row yields a disabled publisher, which
+// Send treats as a no-op — a notification is not worth crashing a scrape over.
+func ntfyNow(ctx context.Context, st *store.Store) *notify.Ntfy {
+	cfg, err := st.GetSettings(ctx, "", "")
+	if err != nil {
+		log.Printf("ntfy: read settings: %v", err)
+		return notify.New("", "", "")
+	}
+	return notify.New(cfg.NtfyServer, cfg.NtfyTopic, cfg.NtfyToken)
+}
+
+func scheduledScrape(ctx context.Context, st *store.Store, scraper *scrape.Client, defInterval, defFull string) {
 	for {
 		cfg, err := st.GetSettings(ctx, defInterval, defFull)
 		if err != nil {
@@ -390,9 +404,11 @@ func scheduledScrape(ctx context.Context, st *store.Store, scraper *scrape.Clien
 			log.Printf("auto-scrape: %v", err)
 			continue
 		}
-		st := scraper.State()
-		log.Printf("auto-scrape: %d new, %d changed", len(st.NewItems), len(st.Changes))
-		notifyScrape(ctx, notifier, st)
+		// Named `run`, not `st`: the store parameter is `st` and shadowing it
+		// here would hide the handle notifyScrape needs.
+		run := scraper.State()
+		log.Printf("auto-scrape: %d new, %d changed", len(run.NewItems), len(run.Changes))
+		notifyScrape(ctx, st, run)
 	}
 }
 
@@ -403,7 +419,7 @@ func scheduledScrape(ctx context.Context, st *store.Store, scraper *scrape.Clien
 // than a process-lifetime timer: the container is recreated on every deploy,
 // and an in-process ticker would restart its countdown each time — a daily
 // backup could then never fire on a week with daily deploys.
-func scheduledBackup(ctx context.Context, st *store.Store, dir string, notifier *notify.Ntfy) {
+func scheduledBackup(ctx context.Context, st *store.Store, dir string) {
 	for {
 		cfg, err := st.GetSettings(ctx, "", "")
 		if err != nil {
@@ -441,7 +457,7 @@ func scheduledBackup(ctx context.Context, st *store.Store, dir string, notifier 
 			// Worth interrupting the owner for: this is the safety net itself
 			// failing, and it failed silently once already.
 			log.Printf("backup FAILED: %v", err)
-			_ = notifier.Send(ctx, "Bandai30: 备份失败", err.Error(), "warning,floppy_disk")
+			_ = ntfyNow(ctx, st).Send(ctx, "Bandai30: 备份失败", err.Error(), "warning,floppy_disk")
 			continue
 		}
 		n, _ := store.PruneBackups(dir, cfg.BackupKeep)
@@ -454,7 +470,7 @@ func scheduledBackup(ctx context.Context, st *store.Store, dir string, notifier 
 // Changes matter as much as new arrivals: a price rise or a release slipping a
 // quarter is the news for something already on the wishlist, and until now
 // those edits were applied silently.
-func notifyScrape(ctx context.Context, notifier *notify.Ntfy, st scrape.RunState) {
+func notifyScrape(ctx context.Context, db *store.Store, st scrape.RunState) {
 	if len(st.NewItems) == 0 && len(st.Changes) == 0 {
 		return
 	}
@@ -478,7 +494,7 @@ func notifyScrape(ctx context.Context, notifier *notify.Ntfy, st scrape.RunState
 		body = append(body, "【变更】")
 		body = append(body, capped(st.Changes, 10)...)
 	}
-	if err := notifier.Send(ctx, "Bandai30: "+strings.Join(head, " · "),
+	if err := ntfyNow(ctx, db).Send(ctx, "Bandai30: "+strings.Join(head, " · "),
 		strings.Join(body, "\n"), "new,robot"); err != nil {
 		log.Printf("auto-scrape: ntfy send: %v", err)
 	}

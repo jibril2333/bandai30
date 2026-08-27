@@ -84,6 +84,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/scrape/status", authd(s.scrapeStatus))
 	mux.Handle("GET /api/settings", authd(s.getSettings))
 	mux.Handle("PUT /api/settings", authd(s.putSettings))
+	mux.Handle("POST /api/settings/ntfy-test", authd(s.testNtfy))
 	mux.Handle("GET /api/backups", authd(s.listBackups))
 	mux.Handle("POST /api/backups", authd(s.runBackup))
 	mux.Handle("GET /api/backups/{name}", authd(s.downloadBackup))
