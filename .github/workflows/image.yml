@@ -150,5 +150,7 @@ jobs:
           N=$(curl -fsS --max-time 10 \
                 "http://${{ vars.NAS_HOST }}:${{ vars.NAS_APP_PORT || '3010' }}/api/items?limit=1" \
               | grep -c '"id"' || true)
-          [ "$N" -ge 1 ] || { echo "::error::catalogue is empty — check the data dir mount" >&2; exit 1; }
+          # Default the count: a failed curl leaves it empty, and `[ "" -ge 1 ]`
+          # is a shell syntax error rather than the diagnosis.
+          [ "${N:-0}" -ge 1 ] || { echo "::error::catalogue empty or unreachable — check the data dir mount" >&2; exit 1; }
           echo "catalogue OK"
