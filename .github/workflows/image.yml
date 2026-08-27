@@ -1,0 +1,154 @@
+name: Build image (GHCR)
+
+# Builds the image on GitHub's runners and publishes it to GHCR, then tells the
+# TrueNAS box to take it. Nothing in this repo ever executes on the NAS — it
+# pulls a finished image. That is the whole reason this is safer than putting a
+# second self-hosted runner on the machine holding the household's storage:
+# a runner executes whatever a workflow says, and the blast radius of a bad
+# workflow would be the NAS rather than a GitHub VM.
+#
+# linux/amd64 ONLY, unlike card-deck-builder's equivalent. That repo builds
+# arm64 as well because it is public (GitHub's arm64 runners are free there)
+# and it also ran on the Mac. This one deploys to exactly one machine, TrueNAS
+# SCALE on x86_64, and this repo is PRIVATE — every runner minute is billed, so
+# a second architecture would be paying to build something nothing runs.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - ".gitignore"
+  workflow_dispatch: {}
+
+concurrency:
+  group: ghcr-image
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          # The commit is compiled into the binary and reported by /api/health;
+          # the deploy job below waits for the NAS to answer with THIS value.
+          build-args: |
+            BANDAI30_GIT_SHA=${{ github.sha }}
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
+
+  # Tell the NAS to take the new image, over Tailscale.
+  #
+  # Why Tailscale and not a public webhook: the NAS has no inbound exposure and
+  # this adds none. The runner joins the tailnet as an ephemeral, tagged node
+  # for the length of the job and then disappears.
+  #
+  # Why watchtower and not SSH: the call below is the entire capability —
+  # "pull the labelled images and recreate them". CI never gets a shell on the
+  # box and the Docker socket stays inside watchtower's container. A stolen
+  # token replays a deployment; a stolen SSH key is the NAS.
+  #
+  # Unconfigured is not a failure: until the secrets exist this job no-ops and
+  # watchtower's own poll (--interval) picks the image up within the hour.
+  deploy-nas:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Are the secrets there?
+        id: check
+        run: |
+          if { [ -n "${{ secrets.TS_OAUTH_CLIENT_ID }}" ] || [ -n "${{ secrets.TS_AUTHKEY }}" ]; } \
+             && [ -n "${{ secrets.NAS_WATCHTOWER_TOKEN }}" ] \
+             && [ -n "${{ vars.NAS_HOST }}" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "NAS 推送未配置(缺 TS_AUTHKEY 或 TS_OAUTH_CLIENT_ID / NAS_WATCHTOWER_TOKEN / NAS_HOST)。"
+            echo "镜像已经推到 GHCR,NAS 会在下一次轮询时自己拉。"
+          fi
+
+      - name: Join the tailnet
+        if: steps.check.outputs.ok == 'true'
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TS_AUTHKEY }}
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          # MagicDNS is off by default on ephemeral nodes, so `truenas` would
+          # not resolve and the curl below would fail as a timeout rather than
+          # as the DNS problem it is.
+          args: --accept-dns=true
+          ping: ${{ vars.NAS_HOST }}
+
+      - name: Ask watchtower to update
+        if: steps.check.outputs.ok == 'true'
+        run: |
+          set -e
+          curl -fsS --max-time 120 \
+            -H "Authorization: Bearer ${{ secrets.NAS_WATCHTOWER_TOKEN }}" \
+            "http://${{ vars.NAS_HOST }}:${{ vars.NAS_WATCHTOWER_PORT || '8080' }}/v1/update"
+          echo
+
+      - name: Wait for the NAS to serve THIS build
+        if: steps.check.outputs.ok == 'true'
+        run: |
+          NAS="${{ vars.NAS_HOST }}"
+          PORT="${{ vars.NAS_APP_PORT || '3010' }}"
+          WANT="${{ github.sha }}"
+          # /api/health reads from SQLite before answering, so this proves the
+          # database is readable as well as reporting the commit the running
+          # binary was built from. Gating only on "something returns 200" is
+          # satisfied instantly by the container that was already running.
+          for i in $(seq 1 60); do
+            GOT="$(curl -fsS --max-time 5 "http://$NAS:$PORT/api/health" \
+                     | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' || true)"
+            if [ "$GOT" = "$WANT" ]; then
+              echo "NAS is serving $WANT"; exit 0
+            fi
+            [ $((i % 6)) -eq 0 ] && echo "still on '${GOT:-unknown}', waiting for $WANT…"
+            sleep 5
+          done
+          echo "NAS never reported $WANT (last saw '${GOT:-unknown}') after 300s" >&2
+          echo "The image is published either way; check watchtower on the NAS." >&2
+          exit 1
+
+      - name: Verify the catalogue is actually there
+        if: steps.check.outputs.ok == 'true'
+        # /api/health deliberately reports no counts (it is the one route
+        # reachable without a session, and the tunnel publishes it). Over
+        # Tailscale we hit the raw port, where BANDAI30_NO_AUTH applies, so the
+        # catalogue can be checked directly — this is what would catch a deploy
+        # that came up on an empty data directory, the failure this app hit
+        # once already on the Mac.
+        run: |
+          N=$(curl -fsS --max-time 10 \
+                "http://${{ vars.NAS_HOST }}:${{ vars.NAS_APP_PORT || '3010' }}/api/items?limit=1" \
+              | grep -c '"id"' || true)
+          [ "$N" -ge 1 ] || { echo "::error::catalogue is empty — check the data dir mount" >&2; exit 1; }
+          echo "catalogue OK"

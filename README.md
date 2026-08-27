@@ -215,6 +215,43 @@ Config via environment (see `.env.example`):
 | `BANDAI30_NTFY_TOPIC` | ntfy.sh topic for "new item" push notifications |
 | `BANDAI30_DATA_DIR` | host path to bind-mount; must be absolute when compose runs from elsewhere |
 
+## Deploying to the NAS
+
+Production runs on the TrueNAS SCALE box, not on the Mac. `git push origin
+main` builds a `linux/amd64` image on GitHub's runners, publishes it to GHCR,
+then asks watchtower on the NAS — over Tailscale — to pull it.
+
+**Nothing in this repo executes on the NAS.** It pulls a finished image. That
+is deliberate: a self-hosted runner executes whatever a workflow says, and the
+blast radius there would be the machine holding the household's storage. What
+CI can do is ask watchtower to pull labelled images. Not a shell, not SSH; the
+Docker socket stays inside watchtower's container.
+
+Single architecture, unlike card-deck-builder's equivalent workflow. That repo
+is public, so GitHub's arm64 runners are free and it also ran on the Mac. This
+one is private — every runner minute is billed — and deploys to exactly one
+x86_64 machine.
+
+The deploy is verified, not assumed: it waits until `/api/health` on the NAS
+reports the **commit this build came from**, then checks the catalogue is
+non-empty. Gating on "something answers 200" is satisfied instantly by the
+container that was already running, and an empty catalogue is the shape of the
+mount-the-wrong-directory failure this app hit once on the Mac.
+
+Runtime configuration (ntfy credentials, the data path) now lives in the app's
+YAML on the NAS rather than in GitHub secrets, because CI no longer touches
+that machine. See `docker-compose.nas.yml`.
+
+### Why it moved off the Mac
+
+On the Mac, `data/` sat on a Docker Desktop bind mount — a VirtioFS forwarding
+layer — and the database was silently corrupted twice, on 2026-07-31 and
+2026-08-06, losing whole pages with the file header among them. A local ZFS
+dataset under native Linux Docker removes that layer. The data directory must
+be a **local** dataset for the same family of reasons: SQLite coordinates
+writers with POSIX locks, and network filesystems do not implement them
+faithfully.
+
 ### Exposing it publicly (Cloudflare Tunnel)
 
 Run `cloudflared` on the host (not as a compose service — that way redeploying
@@ -260,6 +297,7 @@ itself.
 | `GET  /api/export`                | downloads full JSON            |
 | `POST /api/import`                | restore JSON                   |
 | `GET  /photos/{name}`             | gated; served from disk        |
+| `GET  /api/health`                | **no session required** — `{ok, version}` |
 
 ## Data layout
 

@@ -24,6 +24,10 @@ import (
 	"github.com/rei/bandai30/internal/store"
 )
 
+// version is the commit this binary was built from, stamped in by the release
+// build (-ldflags "-X main.version=…"). A local `go build` leaves it "dev".
+var version = "dev"
+
 func main() {
 	addr := flag.String("addr", envOrDefault("BANDAI30_ADDR", "0.0.0.0:3010"), "listen address")
 	dataDir := flag.String("data", envOrDefault("BANDAI30_DATA", "./data"), "data directory (holds db + photos)")
@@ -199,6 +203,7 @@ func main() {
 		WebFS:     webFS,
 		NoAuth:    *noAuth,
 		BaseCtx:   ctx,
+		Version:   version,
 	}
 
 	httpSrv := &http.Server{

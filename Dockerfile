@@ -13,9 +13,15 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+# The commit being built. /api/health reports it, and the deploy workflow waits
+# until the NAS answers with THIS value — otherwise "the site is up" is
+# satisfied by the container that was already running.
+ARG BANDAI30_GIT_SHA=dev
 # Pure-Go modernc.org/sqlite means we don't need CGO; static binary.
 ENV CGO_ENABLED=0
-RUN go build -trimpath -ldflags="-s -w" -o /out/bandai30 ./cmd/bandai30
+RUN go build -trimpath \
+      -ldflags="-s -w -X main.version=${BANDAI30_GIT_SHA}" \
+      -o /out/bandai30 ./cmd/bandai30
 
 # --- runtime ---
 FROM alpine:3.20

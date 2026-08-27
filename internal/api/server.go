@@ -25,6 +25,7 @@ type Server struct {
 	WebFS     fs.FS           // embedded SPA (web/*)
 	NoAuth    bool            // if true, bypass session auth; everyone is "anon"
 	BaseCtx   context.Context // process lifetime; outlives any single request
+	Version   string          // commit this binary was built from; reported by /api/health
 
 	verOnce  sync.Once
 	assetVer string
@@ -49,6 +50,9 @@ func (s *Server) assetVersion() string {
 // Handler returns the root http.Handler with all routes registered.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+
+	// Public, and deliberately so — see health().
+	mux.HandleFunc("GET /api/health", s.health)
 
 	// Public auth endpoints.
 	mux.HandleFunc("POST /api/auth/login", s.handleLogin)

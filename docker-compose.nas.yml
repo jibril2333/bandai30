@@ -1,0 +1,91 @@
+# Running bandai30 on the TrueNAS box.
+#
+# Differs from docker-compose.yml in one decisive way: it does NOT build. The
+# image comes from GHCR, built for linux/amd64 by .github/workflows/image.yml
+# on GitHub's runners. Nothing in this repo executes on the NAS — it pulls a
+# finished image.
+#
+# Usage on the NAS (TrueNAS SCALE ≥ 24.10 has Docker natively; in the UI this
+# goes in Apps → Discover → Custom App → "Install via YAML"):
+#
+#   BANDAI30_DATA_DIR=/mnt/default_pool/appdata/bandai30 \
+#     docker compose -f docker-compose.nas.yml up -d
+#
+# ⚠️ THIS REPO IS PRIVATE, so the GHCR package is private too, and the NAS
+# needs a credential to pull it — unlike card-deck-builder, whose public image
+# any anonymous puller can fetch. One of:
+#
+#   · store a read:packages PAT on the NAS and let watchtower use it:
+#       sudo docker login ghcr.io -u <github-user>       # writes /root/.docker/config.json
+#     then mount that file read-only into the watchtower container.
+#   · or make just the GHCR package public (Packages → bandai30 → Change
+#     visibility). The image holds the Go binary and the embedded SPA — no
+#     data — but it does put the app's front-end source in public view.
+#
+# There is deliberately NO watchtower service here: the box already runs one
+# (`cdb-watchtower`, `--label-enable`), and it is host-level tooling rather
+# than this app's. The label below is what opts this container in.
+#
+# ⚠️ BANDAI30_DATA_DIR MUST be a local ZFS dataset. Never an NFS/SMB share and
+# never a path on another machine: SQLite coordinates writers with POSIX locks,
+# which network filesystems do not implement faithfully.
+#
+# That warning is also the POINT of this file. On the Mac this data lived on a
+# Docker Desktop bind mount — a VirtioFS forwarding layer — and the database
+# was silently corrupted twice (2026-07-31, 2026-08-06), losing whole pages
+# with the header among them. A local dataset on native Linux Docker removes
+# that layer entirely.
+services:
+  app:
+    image: ghcr.io/jibril2333/bandai30:latest
+    container_name: bandai30
+    restart: unless-stopped
+    # Must match the owner of BANDAI30_DATA_DIR, or every write — status
+    # changes, scheduled scrapes, backups — fails at write time. TrueNAS apps
+    # run as 568:568 (`apps`); confirm with `ls -n` on the dataset.
+    user: "${BANDAI30_UID:-568}:${BANDAI30_GID:-568}"
+    ports:
+      - "${BANDAI30_PORT:-3010}:3010"
+    environment:
+      BANDAI30_ADDR: "0.0.0.0:3010"
+      BANDAI30_DATA: "/data"
+      # Auth is enforced at the network layer (Cloudflare Access in front of
+      # the tunnel), not by the app.
+      BANDAI30_NO_AUTH: "1"
+      # Defaults only, for a fresh database. The real cadences are stored in
+      # the DB by the settings page and survive this container being recreated
+      # — which watchtower does on every new build.
+      BANDAI30_SCRAPE_INTERVAL: "168h"
+      BANDAI30_FULL_INTERVAL: "720h"
+      # These used to arrive from GitHub secrets, injected by the Mac's deploy
+      # workflow at `docker compose up` time. That path is gone: CI no longer
+      # touches this machine, so runtime configuration lives HERE, in the app's
+      # YAML in the TrueNAS UI. Empty server means ntfy.sh.
+      BANDAI30_NTFY_SERVER: "${BANDAI30_NTFY_SERVER:-}"
+      BANDAI30_NTFY_TOPIC: "${BANDAI30_NTFY_TOPIC:-}"
+      BANDAI30_NTFY_TOKEN: "${BANDAI30_NTFY_TOKEN:-}"
+      TZ: "${BANDAI30_TZ:-Asia/Tokyo}"
+    healthcheck:
+      # /api/health reads from SQLite before answering, so this reports
+      # unhealthy on a corrupt or unreadable database rather than merely
+      # proving the process still holds the port. wget is busybox's, already
+      # in the alpine base.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "-T", "5", "http://127.0.0.1:3010/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    volumes:
+      - ${BANDAI30_DATA_DIR:?set BANDAI30_DATA_DIR to the dataset holding bandai30.db + photos}:/data
+    labels:
+      # Watchtower runs with --label-enable, so only containers carrying this
+      # are touched by a registry poll.
+      com.centurylinklabs.watchtower.enable: "true"
+      homepage.group: "本地服务"
+      homepage.name: "Bandai 收藏"
+      homepage.icon: "mdi-robot-industrial"
+      # The LAN address, not localhost: homepage runs on the NAS and the link
+      # is followed by a browser on some other machine.
+      homepage.href: "http://192.168.1.12:${BANDAI30_PORT:-3010}"
+      homepage.description: "万代 30MS/30MM 模型收藏管理"
+      homepage.showStats: "true"
