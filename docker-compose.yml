@@ -1,14 +1,16 @@
-# Bandai30 in Docker on this Mac.
+# Bandai30 in Docker, for LOCAL development on a workstation.
 #
-# Deployment is CI/CD-only: `git push origin main` → the self-hosted GitHub
-# Actions runner on this machine builds the image and recreates this container
-# (see .github/workflows/deploy.yml). Don't `docker compose up` by hand for
-# prod — pushing is the supported path.
+# This is no longer how production runs. Production is the TrueNAS box: `git
+# push` builds an image on GitHub's runners, publishes it to GHCR, and
+# watchtower on the NAS pulls it — see docker-compose.nas.yml and
+# .github/workflows/image.yml. The self-hosted runner that used to build and
+# recreate this container on the Mac has been removed.
 #
-# The container publishes 3010 on the host because the tunnel already points
-# there: cloudflared runs as the root system daemon
-# /Library/LaunchDaemons/com.cloudflare.cloudflared.plist. Keeping it on the
-# host, rather than as a sidecar here, means a redeploy never drops the tunnel.
+# It moved because of this file's `volumes:` line. On macOS a bind mount is a
+# VirtioFS forwarding layer, and the SQLite database on the other side of it
+# was silently corrupted twice — 2026-07-31 and 2026-08-06 — losing whole
+# pages with the file header among them. Use this compose file for
+# development; don't put data you care about behind it.
 
 services:
   app:

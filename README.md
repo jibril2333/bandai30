@@ -227,10 +227,11 @@ blast radius there would be the machine holding the household's storage. What
 CI can do is ask watchtower to pull labelled images. Not a shell, not SSH; the
 Docker socket stays inside watchtower's container.
 
-Single architecture, unlike card-deck-builder's equivalent workflow. That repo
-is public, so GitHub's arm64 runners are free and it also ran on the Mac. This
-one is private — every runner minute is billed — and deploys to exactly one
-x86_64 machine.
+The image is multi-arch. The NAS is x86_64, so amd64 is the half that gets
+deployed; arm64 is built because the image is public and an Apple Silicon
+machine should be able to `docker run` it without compiling Go from source.
+Each architecture builds on a runner of that architecture rather than through
+QEMU, and GitHub's arm64 runners are free for public repositories.
 
 The deploy is verified, not assumed: it waits until `/api/health` on the NAS
 reports the **commit this build came from**, then checks the catalogue is
@@ -243,6 +244,11 @@ YAML on the NAS rather than in GitHub secrets, because CI no longer touches
 that machine. See `docker-compose.nas.yml`.
 
 ### Why it moved off the Mac
+
+There used to be a self-hosted runner on the Mac that built and recreated the
+container in place. It is gone, along with the runner registration: a runner
+executes whatever a workflow says, and this repo is public.
+
 
 On the Mac, `data/` sat on a Docker Desktop bind mount — a VirtioFS forwarding
 layer — and the database was silently corrupted twice, on 2026-07-31 and

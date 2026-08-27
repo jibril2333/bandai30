@@ -1,30 +1,23 @@
 # Running bandai30 on the TrueNAS box.
 #
 # Differs from docker-compose.yml in one decisive way: it does NOT build. The
-# image comes from GHCR, built for linux/amd64 by .github/workflows/image.yml
-# on GitHub's runners. Nothing in this repo executes on the NAS — it pulls a
-# finished image.
+# image comes from GHCR, built by .github/workflows/image.yml on GitHub's
+# runners. Nothing in this repo executes on the NAS — it pulls a finished
+# image, which is the whole reason this arrangement is safer than putting a
+# self-hosted runner on the machine that holds your storage.
 #
 # Usage on the NAS (TrueNAS SCALE ≥ 24.10 has Docker natively; in the UI this
 # goes in Apps → Discover → Custom App → "Install via YAML"):
 #
-#   BANDAI30_DATA_DIR=/mnt/default_pool/appdata/bandai30 \
+#   BANDAI30_DATA_DIR=/mnt/<pool>/<dataset>/bandai30 \
+#   BANDAI30_LAN_HOST=<nas LAN address> \
 #     docker compose -f docker-compose.nas.yml up -d
 #
-# ⚠️ THIS REPO IS PRIVATE, so the GHCR package is private too, and the NAS
-# needs a credential to pull it — unlike card-deck-builder, whose public image
-# any anonymous puller can fetch. One of:
+#   docker compose -f docker-compose.nas.yml pull && \
+#   docker compose -f docker-compose.nas.yml up -d      # take a new build
 #
-#   · store a read:packages PAT on the NAS and let watchtower use it:
-#       sudo docker login ghcr.io -u <github-user>       # writes /root/.docker/config.json
-#     then mount that file read-only into the watchtower container.
-#   · or make just the GHCR package public (Packages → bandai30 → Change
-#     visibility). The image holds the Go binary and the embedded SPA — no
-#     data — but it does put the app's front-end source in public view.
-#
-# There is deliberately NO watchtower service here: the box already runs one
-# (`cdb-watchtower`, `--label-enable`), and it is host-level tooling rather
-# than this app's. The label below is what opts this container in.
+# An empty data directory is fine: the app creates the database, seeds the
+# collections and scrapes its own catalogue on first run (README, "First run").
 #
 # ⚠️ BANDAI30_DATA_DIR MUST be a local ZFS dataset. Never an NFS/SMB share and
 # never a path on another machine: SQLite coordinates writers with POSIX locks,
@@ -78,14 +71,68 @@ services:
     volumes:
       - ${BANDAI30_DATA_DIR:?set BANDAI30_DATA_DIR to the dataset holding bandai30.db + photos}:/data
     labels:
-      # Watchtower runs with --label-enable, so only containers carrying this
-      # are touched by a registry poll.
+      # Watchtower only touches containers carrying this label (it runs with
+      # --label-enable below), so nothing else on the box can be restarted by
+      # a registry poll.
       com.centurylinklabs.watchtower.enable: "true"
       homepage.group: "本地服务"
       homepage.name: "Bandai 收藏"
       homepage.icon: "mdi-robot-industrial"
       # The LAN address, not localhost: homepage runs on the NAS and the link
-      # is followed by a browser on some other machine.
-      homepage.href: "http://192.168.1.12:${BANDAI30_PORT:-3010}"
+      # is followed by a browser on some other machine. Set BANDAI30_LAN_HOST
+      # to your own NAS — the default is only a placeholder.
+      homepage.href: "http://${BANDAI30_LAN_HOST:-nas.local}:${BANDAI30_PORT:-3010}"
       homepage.description: "万代 30MS/30MM 模型收藏管理"
       homepage.showStats: "true"
+
+  # Takes a new build without anything reaching into the NAS from outside.
+  #
+  # The alternative — a GitHub Actions self-hosted runner on the NAS — was
+  # rejected on purpose: this repo is public, and a runner executes whatever a
+  # workflow says on the machine that holds your storage. Here the traffic is
+  # outbound only: watchtower asks GHCR whether the digest moved, and if it
+  # did, pulls and recreates the one container carrying the label above.
+  #
+  # It needs the Docker socket, which is a real privilege — but it is NAS
+  # admin tooling, not the internet-facing app. The app itself still has no
+  # socket, which is the property that matters.
+  #
+  # Behind a profile, because watchtower is host-level tooling and one per box
+  # is enough. On a machine that already runs one for another app, leave this
+  # off and the label above is all this container needs:
+  #
+  #   docker compose -f docker-compose.nas.yml up -d                    # app only
+  #   docker compose -f docker-compose.nas.yml --profile auto-update up -d
+  #
+  # The profile decides what RUNS, not what is parsed: compose interpolates
+  # every service in the file whatever profile is active, so the `:?` below
+  # fires even on the app-only line. Set BANDAI30_WATCHTOWER_TOKEN to any
+  # placeholder when running without the profile. Keeping `:?` is still worth
+  # that: an empty token on a published --http-api-update endpoint would be an
+  # unauthenticated "restart my containers" button.
+  watchtower:
+    image: containrrr/watchtower
+    container_name: bandai30-watchtower
+    restart: unless-stopped
+    profiles: ["auto-update"]
+    # Two ways in, and they cover each other:
+    #   · --interval: the poll. Still there so a deploy isn't lost when the
+    #     NAS was down at the moment CI called.
+    #   · --http-api-update: an endpoint that updates NOW. GitHub Actions calls
+    #     it at the end of a build, over Tailscale — see .github/workflows.
+    #
+    # The endpoint is NOT published to the internet: no port forward, nothing
+    # on the Cloudflare tunnel. It is reachable from the LAN and the tailnet,
+    # and the token is what authorises the call. Note what CI can and cannot
+    # do with it: ask watchtower to pull labelled images. Not a shell, not
+    # SSH, not the Docker socket — that stays inside this container.
+    command: >-
+      --label-enable --cleanup
+      --interval ${BANDAI30_WATCH_INTERVAL:-3600}
+      --http-api-update --http-api-periodic-polls
+    environment:
+      WATCHTOWER_HTTP_API_TOKEN: "${BANDAI30_WATCHTOWER_TOKEN:?set a long random token; GitHub Actions sends it}"
+    ports:
+      - "${BANDAI30_WATCHTOWER_PORT:-8080}:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

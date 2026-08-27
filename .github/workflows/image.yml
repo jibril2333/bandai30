@@ -1,24 +1,34 @@
 name: Build image (GHCR)
 
-# Builds the image on GitHub's runners and publishes it to GHCR, then tells the
-# TrueNAS box to take it. Nothing in this repo ever executes on the NAS — it
-# pulls a finished image. That is the whole reason this is safer than putting a
-# second self-hosted runner on the machine holding the household's storage:
-# a runner executes whatever a workflow says, and the blast radius of a bad
-# workflow would be the NAS rather than a GitHub VM.
+# Builds the image on GitHub's own runners — one job per architecture, each on
+# a machine of that architecture — and publishes a multi-arch tag to GHCR, so
+# the TrueNAS box runs the app by pulling rather than by building.
 #
-# linux/amd64 ONLY, unlike card-deck-builder's equivalent. That repo builds
-# arm64 as well because it is public (GitHub's arm64 runners are free there)
-# and it also ran on the Mac. This one deploys to exactly one machine, TrueNAS
-# SCALE on x86_64, and this repo is PRIVATE — every runner minute is billed, so
-# a second architecture would be paying to build something nothing runs.
+# SECURITY, and the reason this is not simply a self-hosted runner: the repo is
+# public. A runner executes whatever a workflow says, on the machine it is
+# installed on; putting one on the NAS would make every workflow change a
+# potential foothold on the box that holds the household's storage. Here the
+# NAS never executes anything from this repo — it pulls an image. The blast
+# radius stays inside GitHub's runner.
+#
+# This app previously deployed to a self-hosted runner on the owner's Mac.
+# That is gone, and so is the runner: the database lived on a Docker Desktop
+# bind mount (a VirtioFS forwarding layer) and was silently corrupted twice,
+# losing whole pages with the file header among them.
+#
+# Documentation-only commits are skipped — the image wouldn't differ.
 on:
   push:
     branches: [main]
     paths-ignore:
       - "**/*.md"
       - ".gitignore"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag (default: latest)"
+        required: false
+        default: latest
 
 concurrency:
   group: ghcr-image
@@ -28,12 +38,30 @@ env:
   IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
+  # Each architecture on a machine of that architecture, rather than one x86
+  # runner emulating arm64 through QEMU. GitHub's arm64 runners are free for
+  # public repositories.
+  #
+  # The NAS is x86_64, so amd64 is the half that gets deployed; arm64 is here
+  # because the image is public and an Apple Silicon machine should be able to
+  # `docker run` it without building Go from source.
   build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
+
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -45,46 +73,111 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      # Pushed by digest, without a tag: neither half is the image on its own,
+      # and tagging both would leave whichever finished last as `latest` — a
+      # single-architecture image wearing a multi-architecture name.
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64
-          push: true
+          platforms: ${{ matrix.platform }}
           # The commit is compiled into the binary and reported by /api/health;
-          # the deploy job below waits for the NAS to answer with THIS value.
+          # the deploy job waits for the NAS to answer with THIS value.
           build-args: |
             BANDAI30_GIT_SHA=${{ github.sha }}
-          tags: |
-            ${{ env.IMAGE }}:latest
-            ${{ env.IMAGE }}:${{ github.sha }}
-          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
-          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          # Separate cache per architecture; one shared ref would have the two
+          # jobs overwriting each other's layers on every run.
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.arch }}
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.arch }},mode=max
+
+      - name: Save the digest
+        run: |
+          mkdir -p /tmp/digests
+          # The filename IS the digest; the merge job turns the set of names
+          # back into `image@sha256:…` references.
+          touch "/tmp/digests/$(echo '${{ steps.build.outputs.digest }}' | sed 's|sha256:||')"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          retention-days: 1
+
+  # The tag people actually pull points at a manifest LIST naming both digests.
+  merge:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create the manifest list
+        run: |
+          cd /tmp/digests
+          TAG="${{ inputs.tag || 'latest' }}"
+          # Word splitting is the mechanism here, not an accident: each digest
+          # filename has to arrive as its own argument.
+          # shellcheck disable=SC2046
+          docker buildx imagetools create \
+            -t "${{ env.IMAGE }}:$TAG" \
+            -t "${{ env.IMAGE }}:${{ github.sha }}" \
+            $(printf "${{ env.IMAGE }}@sha256:%s " *)
+          docker buildx imagetools inspect "${{ env.IMAGE }}:$TAG"
 
   # Tell the NAS to take the new image, over Tailscale.
   #
-  # Why Tailscale and not a public webhook: the NAS has no inbound exposure and
-  # this adds none. The runner joins the tailnet as an ephemeral, tagged node
-  # for the length of the job and then disappears.
+  # Why Tailscale rather than a public webhook: the NAS has no inbound exposure
+  # and this doesn't add any. The runner joins the tailnet as an EPHEMERAL,
+  # TAGGED node for the length of the job and disappears; ACLs decide what
+  # tag:ci may reach, so the blast radius is one port on one host rather than
+  # "the internet can ask my NAS to do things".
   #
-  # Why watchtower and not SSH: the call below is the entire capability —
-  # "pull the labelled images and recreate them". CI never gets a shell on the
-  # box and the Docker socket stays inside watchtower's container. A stolen
-  # token replays a deployment; a stolen SSH key is the NAS.
+  # The NAS's name comes from `secrets.NAS_HOST` when it exists, and only falls
+  # back to `vars.NAS_HOST`. Not a security control — it is a tailnet name,
+  # useless to anyone not on the tailnet — but this repo is PUBLIC, which makes
+  # its workflow LOGS public, and GitHub renders a variable into the script it
+  # echoes (`[ -n "truenas" ]`) while masking a secret (`***`). No reason to
+  # publish the name of a machine in someone's house.
+  #
+  # Why not SSH: the call below is the whole capability — "pull the labelled
+  # images and recreate them". CI never gets a shell on the box, and the Docker
+  # socket stays inside watchtower's container. A stolen token replays a
+  # deployment; a stolen SSH key is the NAS.
   #
   # Unconfigured is not a failure: until the secrets exist this job no-ops and
-  # watchtower's own poll (--interval) picks the image up within the hour.
+  # the poll (watchtower --interval) picks the image up on its own. Nobody
+  # should get a red build for not having finished a network setup.
   deploy-nas:
-    needs: build
+    needs: merge
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Are the secrets there?
         id: check
         run: |
+          # Either credential works: an OAuth client (doesn't expire, but not
+          # offered on every plan) or a tagged, reusable, ephemeral auth key
+          # (any plan, expires after at most 90 days).
           if { [ -n "${{ secrets.TS_OAUTH_CLIENT_ID }}" ] || [ -n "${{ secrets.TS_AUTHKEY }}" ]; } \
              && [ -n "${{ secrets.NAS_WATCHTOWER_TOKEN }}" ] \
-             && [ -n "${{ vars.NAS_HOST }}" ]; then
+             && [ -n "${{ secrets.NAS_HOST || vars.NAS_HOST }}" ]; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
             echo "ok=false" >> "$GITHUB_OUTPUT"
@@ -96,35 +189,42 @@ jobs:
         if: steps.check.outputs.ok == 'true'
         uses: tailscale/github-action@v4
         with:
+          # Whichever of the two is configured; the action prefers the authkey
+          # when it's non-empty.
           authkey: ${{ secrets.TS_AUTHKEY }}
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
-          # MagicDNS is off by default on ephemeral nodes, so `truenas` would
-          # not resolve and the curl below would fail as a timeout rather than
-          # as the DNS problem it is.
+          # MagicDNS off by default on these ephemeral nodes, so `truenas`
+          # would not resolve and the curl below would fail with something
+          # far less obvious than "DNS".
           args: --accept-dns=true
-          ping: ${{ vars.NAS_HOST }}
+          # Fails here, with a clear message, rather than three steps later
+          # inside a curl timeout.
+          ping: ${{ secrets.NAS_HOST || vars.NAS_HOST }}
 
       - name: Ask watchtower to update
         if: steps.check.outputs.ok == 'true'
         run: |
           set -e
+          NAS="${{ secrets.NAS_HOST || vars.NAS_HOST }}"
+          PORT="${{ vars.NAS_WATCHTOWER_PORT || '8080' }}"
           curl -fsS --max-time 120 \
             -H "Authorization: Bearer ${{ secrets.NAS_WATCHTOWER_TOKEN }}" \
-            "http://${{ vars.NAS_HOST }}:${{ vars.NAS_WATCHTOWER_PORT || '8080' }}/v1/update"
+            "http://$NAS:$PORT/v1/update"
           echo
 
       - name: Wait for the NAS to serve THIS build
         if: steps.check.outputs.ok == 'true'
         run: |
-          NAS="${{ vars.NAS_HOST }}"
+          NAS="${{ secrets.NAS_HOST || vars.NAS_HOST }}"
           PORT="${{ vars.NAS_APP_PORT || '3010' }}"
           WANT="${{ github.sha }}"
-          # /api/health reads from SQLite before answering, so this proves the
-          # database is readable as well as reporting the commit the running
-          # binary was built from. Gating only on "something returns 200" is
-          # satisfied instantly by the container that was already running.
+          # Two conditions, and the second one is the point: /api/health reads
+          # from SQLite (so the database is usable, not just the port open),
+          # AND reports the commit its image was built from. Waiting only for
+          # "something answers 200" passes against the container that was
+          # already running.
           for i in $(seq 1 60); do
             GOT="$(curl -fsS --max-time 5 "http://$NAS:$PORT/api/health" \
                      | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' || true)"
@@ -140,17 +240,19 @@ jobs:
 
       - name: Verify the catalogue is actually there
         if: steps.check.outputs.ok == 'true'
-        # /api/health deliberately reports no counts (it is the one route
-        # reachable without a session, and the tunnel publishes it). Over
+        # /api/health deliberately reports no counts — it is the one route
+        # reachable without a session, and the tunnel publishes it. Over
         # Tailscale we hit the raw port, where BANDAI30_NO_AUTH applies, so the
-        # catalogue can be checked directly — this is what would catch a deploy
-        # that came up on an empty data directory, the failure this app hit
-        # once already on the Mac.
+        # catalogue can be checked directly. This is what would catch a deploy
+        # that came up on an empty data directory: the failure this app hit
+        # once already on the Mac, where a relative path resolved to the CI
+        # checkout and the app cheerfully created a blank database there.
         run: |
-          N=$(curl -fsS --max-time 10 \
-                "http://${{ vars.NAS_HOST }}:${{ vars.NAS_APP_PORT || '3010' }}/api/items?limit=1" \
+          NAS="${{ secrets.NAS_HOST || vars.NAS_HOST }}"
+          PORT="${{ vars.NAS_APP_PORT || '3010' }}"
+          N=$(curl -fsS --max-time 10 "http://$NAS:$PORT/api/items?limit=1" \
               | grep -c '"id"' || true)
-          # Default the count: a failed curl leaves it empty, and `[ "" -ge 1 ]`
-          # is a shell syntax error rather than the diagnosis.
+          # Default the count: a failed curl leaves it empty, and
+          # `[ "" -ge 1 ]` is a shell syntax error rather than the diagnosis.
           [ "${N:-0}" -ge 1 ] || { echo "::error::catalogue empty or unreachable — check the data dir mount" >&2; exit 1; }
           echo "catalogue OK"
