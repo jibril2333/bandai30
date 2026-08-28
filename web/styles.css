@@ -589,6 +589,32 @@ a.metric:hover { border-color: var(--primary); }
   background: var(--card); border: 1px solid var(--border); border-radius: 14px;
   padding: 4px 16px; margin-bottom: 14px; box-shadow: var(--shadow);
 }
+/* Names the card's concern, so the rows below can be plain field names at one
+   consistent level instead of mixing "what this is" with "what to type". */
+.set-title {
+  font-size: 12px; font-weight: 600; letter-spacing: .04em;
+  color: var(--text-dim); text-transform: uppercase;
+  padding: 14px 0 2px;
+}
+/* Free text needs the room a dropdown doesn't: a server URL was being cut off
+   in a fixed-width control. */
+.set-text {
+  flex: 1; min-width: 0; max-width: 340px;
+  height: 34px; padding: 0 10px; font: inherit; font-size: 13px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: 8px;
+}
+.set-text:focus { outline: none; border-color: var(--primary); }
+/* The schedule state belongs to the interval it describes, so it sits under
+   that row's label rather than in a row of its own — two rows both labelled
+   "增量" was the first draft, and read as a duplicate. */
+.set-when { color: var(--text-dim); opacity: .8; font-variant-numeric: tabular-nums; }
+/* One save for the page, parked at the end of it. */
+.set-save {
+  display: flex; align-items: center; gap: 12px;
+  justify-content: flex-end; padding: 4px 2px 24px;
+}
+.set-save .set-state { margin-left: 0; }
 .set-row {
   display: flex; align-items: center; gap: 16px;
   padding: 14px 0; border-bottom: 1px solid var(--border);

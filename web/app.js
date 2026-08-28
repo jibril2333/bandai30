@@ -376,31 +376,27 @@ async function renderSettings() {
     $('main').innerHTML = `<div class="landing"><h1>设置</h1><div class="empty">读取失败: ${escapeHtml(e.message)}</div></div>`;
     return;
   }
+
+  // "上次 → 下次" reads as a range, and an em-dash for "never" reads as a
+  // missing value rather than a state. Say the state instead.
+  const when = (last, next) =>
+    !last ? '未运行过' : `上次 ${fmtTime(last)}` + (next ? ` · 下次 ${fmtTime(next)}` : ' · 不再自动运行');
+
   $('main').innerHTML = `<div class="landing settings">
     <h1>设置</h1>
-    <p class="lede">自动更新在后台抓取万代官网。两种更新各有独立的周期，设置存在数据库里，重新部署不会丢。</p>
 
     <div class="set-card">
+      <div class="set-title">自动更新</div>
       <div class="set-row">
-        <div class="set-label"><b>增量更新</b><small>只读列表页：新品、改价、改名。约 1 分钟</small></div>
+        <div class="set-label"><b>增量</b><small>只读列表页：新品、改价、改名。约 1 分钟</small>
+          <small class="set-when">${when(cfg.lastRun, cfg.nextRun)}</small></div>
         ${intervalSelect('s-interval', cfg.autoInterval)}
       </div>
       <div class="set-row">
-        <div class="set-label"><b>全量更新</b><small>逐个打开详情页补齐多图，并替换占位图。数分钟，建议设得比增量长</small></div>
+        <div class="set-label"><b>全量</b><small>逐个打开详情页补齐多图并替换占位图。数分钟</small>
+          <small class="set-when">${when(cfg.lastFullRun, cfg.nextFullRun)}</small></div>
         ${intervalSelect('s-full', cfg.fullInterval)}
       </div>
-      <div class="set-actions">
-        <span class="set-state" id="s-state"></span>
-        <button id="s-save" class="primary">保存</button>
-      </div>
-    </div>
-
-    <div class="set-card">
-      <div class="set-row"><div class="set-label"><b>增量 · 上次 / 下次</b></div>
-        <span>${fmtTime(cfg.lastRun)} → ${cfg.nextRun ? fmtTime(cfg.nextRun) : '已关闭'}</span></div>
-      <div class="set-row"><div class="set-label"><b>全量 · 上次 / 下次</b></div>
-        <span>${fmtTime(cfg.lastFullRun)} → ${cfg.nextFullRun ? fmtTime(cfg.nextFullRun) : '已关闭'}</span></div>
-      <div class="set-row"><div class="set-label"><b>手动更新</b><small>随时触发一次，与自动更新共用同一把锁</small></div>${refreshBtnHTML('')}</div>
       <div class="set-row set-progress" id="s-progress" hidden>
         <div class="prog-wrap">
           <div class="prog-text" id="s-progress-text"></div>
@@ -408,94 +404,102 @@ async function renderSettings() {
           <div class="prog-fail" id="s-progress-fail" hidden></div>
         </div>
       </div>
+      <div class="set-actions">${refreshBtnHTML('')}</div>
     </div>
 
     <div class="set-card">
+      <div class="set-title">推送通知</div>
       <div class="set-row">
-        <div class="set-label"><b>推送通知</b><small>抓到新品或改价时推到手机。留空主题即关闭</small></div>
-        <input id="s-ntfy-topic" type="text" placeholder="主题名" value="${escapeAttr(cfg.ntfyTopic || '')}">
+        <div class="set-label"><b>主题</b><small>留空即关闭</small></div>
+        <input id="s-ntfy-topic" class="set-text" type="text" value="${escapeAttr(cfg.ntfyTopic || '')}">
       </div>
       <div class="set-row">
-        <div class="set-label"><b>服务器</b><small>留空用公共的 ntfy.sh</small></div>
-        <input id="s-ntfy-server" type="text" placeholder="https://ntfy.sh" value="${escapeAttr(cfg.ntfyServer || '')}">
+        <div class="set-label"><b>服务器</b></div>
+        <input id="s-ntfy-server" class="set-text" type="text" placeholder="https://ntfy.sh" value="${escapeAttr(cfg.ntfyServer || '')}">
       </div>
       <div class="set-row">
-        <div class="set-label"><b>令牌</b><small>${cfg.ntfyTokenSet ? '已设置。留空保持不变，填 <code>-</code> 可清除' : '自建服务器若拒绝匿名发布则需要'}</small></div>
-        <input id="s-ntfy-token" type="password" autocomplete="new-password" placeholder="${cfg.ntfyTokenSet ? '••••••••（保持不变）' : '可留空'}">
+        <div class="set-label"><b>令牌</b></div>
+        <input id="s-ntfy-token" class="set-text" type="password" autocomplete="new-password"
+               placeholder="${cfg.ntfyTokenSet ? '已设置 · 输入以更改' : '公共 ntfy.sh 不需要'}">
+        ${cfg.ntfyTokenSet ? '<button id="n-clear" class="ghost-sm">清除</button>' : ''}
       </div>
       <div class="set-actions">
         <span class="set-state" id="n-state"></span>
         <button id="n-test">发送测试</button>
-        <button id="n-save" class="primary">保存</button>
       </div>
     </div>
 
     <div class="set-card">
+      <div class="set-title">自动备份</div>
       <div class="set-row">
-        <div class="set-label"><b>自动备份</b><small>快照会先做完整性校验，不合格直接丢弃。每份约 300 KB</small></div>
+        <div class="set-label"><b>周期</b><small>快照先做完整性校验，不合格直接丢弃。每份约 300 KB</small>
+          <small class="set-when">${when(cfg.lastBackup, cfg.nextBackup)}</small></div>
         ${intervalSelect('s-backup', cfg.backupInterval)}
       </div>
       <div class="set-row">
         <div class="set-label"><b>保留份数</b><small>超出的自动删除，最旧的先删</small></div>
         <input id="s-keep" type="number" min="1" max="365" value="${cfg.backupKeep || 14}">
       </div>
-      <div class="set-row">
-        <div class="set-label"><b>备份 · 上次 / 下次</b></div>
-        <span>${fmtTime(cfg.lastBackup)} → ${cfg.nextBackup ? fmtTime(cfg.nextBackup) : '已关闭'}</span>
-      </div>
-      <div class="set-row">
-        <div class="set-label"><b>现有备份</b><small>下载一份存到别处——快照和数据库在同一块盘上</small></div>
+      <div class="set-actions">
         <span class="set-state" id="b-state"></span>
         <button id="b-now">立即备份</button>
       </div>
       <div class="set-row backup-list" id="b-list">${backupListHTML(backups)}</div>
     </div>
+
+    <div class="set-save">
+      <span class="set-state" id="s-state"></span>
+      <button id="s-save" class="primary">保存</button>
+    </div>
   </div>`;
 
-  // Both save buttons persist the WHOLE page, not just their own card — the
-  // form is loaded from the server in one go, so the page is the unit of
-  // state and a partial write would need the API to merge field by field.
-  // The consequence to know: pressing either 保存 commits whatever is in the
-  // other card's inputs too, half-typed included. The separate buttons exist
-  // for feedback placement, and because 发送测试 has to save before it can
-  // test what is stored.
-  const saveNtfy = async () => {
-    const raw = $('s-ntfy-token').value;
-    const body = {
-      autoInterval: $('s-interval').value,
-      fullInterval: $('s-full').value,
-      backupInterval: $('s-backup').value,
-      backupKeep: Math.max(1, Math.min(365, +$('s-keep').value || 14)),
-      ntfyTopic: $('s-ntfy-topic').value.trim(),
-      ntfyServer: $('s-ntfy-server').value.trim(),
-    };
-    // Absent = leave the stored token alone; the page never receives it, so it
-    // cannot echo it back. A lone "-" is the way to ask for it to be cleared.
-    if (raw === '-') body.ntfyToken = '';
-    else if (raw !== '') body.ntfyToken = raw;
-    await api.saveSettings(body);
-    $('s-ntfy-token').value = '';
-  };
+  // One save for the page, because one save is what actually happens: the API
+  // writes every field, so two buttons would only look like they wrote
+  // different halves.
+  const collect = () => ({
+    autoInterval: $('s-interval').value,
+    fullInterval: $('s-full').value,
+    backupInterval: $('s-backup').value,
+    backupKeep: Math.max(1, Math.min(365, +$('s-keep').value || 14)),
+    ntfyTopic: $('s-ntfy-topic').value.trim(),
+    ntfyServer: $('s-ntfy-server').value.trim(),
+    // Absent leaves the stored token alone — the page never receives it, so it
+    // cannot echo it back. Clearing is the 清除 button, not a magic value.
+    ...($('s-ntfy-token').value ? { ntfyToken: $('s-ntfy-token').value } : {}),
+  });
 
-  $('n-save').onclick = async () => {
-    const st = $('n-state');
+  const save = async (stateEl) => {
+    const st = $(stateEl);
     st.textContent = '保存中…'; st.className = 'set-state';
     try {
-      await saveNtfy();
+      await api.saveSettings(collect());
       st.textContent = '已保存 ✓'; st.className = 'set-state ok';
-      setTimeout(() => render(), 800);
+      return true;
     } catch (e) {
-      st.textContent = '保存失败: ' + e.message; st.className = 'set-state err';
+      st.textContent = '失败: ' + e.message; st.className = 'set-state err';
+      return false;
     }
+  };
+
+  $('s-save').onclick = async () => { if (await save('s-state')) setTimeout(() => render(), 800); };
+
+  if ($('n-clear')) $('n-clear').onclick = async () => {
+    const st = $('n-state');
+    st.textContent = '清除中…'; st.className = 'set-state';
+    try {
+      await api.saveSettings({ ...collect(), ntfyToken: '' });
+      st.textContent = '已清除 ✓'; st.className = 'set-state ok';
+      setTimeout(() => render(), 700);
+    } catch (e) { st.textContent = '失败: ' + e.message; st.className = 'set-state err'; }
   };
 
   $('n-test').onclick = async () => {
     const st = $('n-state');
-    // Save first: testing what's on screen rather than what's stored would
-    // pass on a token you never persisted.
+    // Save first: testing what is on screen rather than what is stored would
+    // pass on a token that was never persisted.
     st.textContent = '发送中…'; st.className = 'set-state';
     try {
-      await saveNtfy();
+      await api.saveSettings(collect());
       await api.testNtfy();
       st.textContent = '已发送，看手机 ✓'; st.className = 'set-state ok';
     } catch (e) {
@@ -507,30 +511,11 @@ async function renderSettings() {
     const st = $('b-state');
     st.textContent = '备份中…'; st.className = 'set-state';
     try {
-      const r = await api.runBackup();
+      await api.runBackup();
       st.textContent = '已备份 ✓'; st.className = 'set-state ok';
       $('b-list').innerHTML = backupListHTML(await api.backups());
     } catch (e) {
       st.textContent = '失败: ' + e.message; st.className = 'set-state err';
-    }
-  };
-
-  $('s-save').onclick = async () => {
-    const st = $('s-state');
-    st.textContent = '保存中…'; st.className = 'set-state';
-    try {
-      await api.saveSettings({
-        autoInterval: $('s-interval').value,
-        fullInterval: $('s-full').value,
-        backupInterval: $('s-backup').value,
-        backupKeep: Math.max(1, Math.min(365, +$('s-keep').value || 14)),
-        ntfyTopic: $('s-ntfy-topic').value.trim(),
-        ntfyServer: $('s-ntfy-server').value.trim(),
-      });
-      st.textContent = '已保存 ✓'; st.className = 'set-state ok';
-      setTimeout(() => render(), 800);   // refresh the "next run" line
-    } catch (e) {
-      st.textContent = '保存失败: ' + e.message; st.className = 'set-state err';
     }
   };
   wireRefresh();
