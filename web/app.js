@@ -209,32 +209,38 @@ $('theme-btn').onclick = () => {
 updateThemeBtn();
 
 // ---------- landing (collection dashboard) ----------
-// The dashboard's headline. Five flat tiles gave the same weight to the total
-// row count and to the money, and none of them said what the collection looks
-// like as a whole — one segmented bar does that better than four numbers can.
+// The dashboard's headline.
+//
+// Five flat tiles came first, then a big number pinned to the left with a
+// count pinned to the right — which on a wide screen left a thousand pixels of
+// nothing between them, and printed the owned count twice. The stats now run
+// across the band, so the width carries content instead of a gap.
 function heroHTML({ total, owned, onWay, wish, spent }) {
   const rest = Math.max(0, total - owned - onWay - wish);
-  const pct = n => total ? (100 * n / total) : 0;
-  const seg = (n, cls) => n ? `<i class="${cls}" style="width:${pct(n)}%"></i>` : '';
-  const leg = (n, cls, label) => n
-    ? `<a href="#/mine" class="hl ${cls}"><b>${n}</b>${label}</a>` : '';
+  const pct = total ? (100 * owned / total) : 0;
+  const seg = (n, cls) => n ? `<i class="${cls}" style="width:${100 * n / (total || 1)}%"></i>` : '';
+  // Only the marked ones lead anywhere: "收录" is the catalogue, not a filter.
+  const stat = (n, cls, label, href) => {
+    const body = `<div class="hs-n">${n}</div><div class="hs-l">${label}</div>`;
+    return href ? `<a href="${href}" class="hs ${cls}">${body}</a>` : `<div class="hs ${cls}">${body}</div>`;
+  };
   return `
   <div class="hero">
-    <div class="hero-top">
-      <div class="hero-money">
-        <div class="hero-cap">已投入</div>
-        <div class="hero-num">${spent ? fmtPrice(spent) : '¥0'}</div>
+    <div class="hero-stats">
+      <div class="hs hs-money">
+        <div class="hs-n">${spent ? fmtPrice(spent) : '¥0'}</div>
+        <div class="hs-l">已投入</div>
       </div>
-      <div class="hero-count">
-        <b>${owned}</b><span>/ ${total} 已拥有</span>
+      ${stat(owned, 'own', '已拥有', '#/mine')}
+      ${onWay ? stat(onWay, 'way', '未到货', '#/mine') : ''}
+      ${stat(wish, 'want', '想要', '#/mine')}
+      ${stat(total, 'all', '收录')}
+    </div>
+    <div class="hero-progress">
+      <div class="hero-bar">
+        ${seg(owned, 'own')}${seg(onWay, 'way')}${seg(wish, 'want')}${seg(rest, 'rest')}
       </div>
-    </div>
-    <div class="hero-bar">
-      ${seg(owned, 'own')}${seg(onWay, 'way')}${seg(wish, 'want')}${seg(rest, 'rest')}
-    </div>
-    <div class="hero-legend">
-      ${leg(owned, 'own', '已拥有')}${leg(onWay, 'way', '未到货')}${leg(wish, 'want', '想要')}
-      <span class="hl rest"><b>${rest}</b>未收</span>
+      <div class="hero-pct">${pct.toFixed(1)}% 已收集</div>
     </div>
   </div>`;
 }
