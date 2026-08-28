@@ -209,6 +209,36 @@ $('theme-btn').onclick = () => {
 updateThemeBtn();
 
 // ---------- landing (collection dashboard) ----------
+// The dashboard's headline. Five flat tiles gave the same weight to the total
+// row count and to the money, and none of them said what the collection looks
+// like as a whole — one segmented bar does that better than four numbers can.
+function heroHTML({ total, owned, onWay, wish, spent }) {
+  const rest = Math.max(0, total - owned - onWay - wish);
+  const pct = n => total ? (100 * n / total) : 0;
+  const seg = (n, cls) => n ? `<i class="${cls}" style="width:${pct(n)}%"></i>` : '';
+  const leg = (n, cls, label) => n
+    ? `<a href="#/mine" class="hl ${cls}"><b>${n}</b>${label}</a>` : '';
+  return `
+  <div class="hero">
+    <div class="hero-top">
+      <div class="hero-money">
+        <div class="hero-cap">已投入</div>
+        <div class="hero-num">${spent ? fmtPrice(spent) : '¥0'}</div>
+      </div>
+      <div class="hero-count">
+        <b>${owned}</b><span>/ ${total} 已拥有</span>
+      </div>
+    </div>
+    <div class="hero-bar">
+      ${seg(owned, 'own')}${seg(onWay, 'way')}${seg(wish, 'want')}${seg(rest, 'rest')}
+    </div>
+    <div class="hero-legend">
+      ${leg(owned, 'own', '已拥有')}${leg(onWay, 'way', '未到货')}${leg(wish, 'want', '想要')}
+      <span class="hl rest"><b>${rest}</b>未收</span>
+    </div>
+  </div>`;
+}
+
 async function renderLanding() {
   document.title = 'Bandai 收藏';
   document.documentElement.style.setProperty('--primary', '#e8467a');
@@ -262,13 +292,7 @@ async function renderLanding() {
     <h1>我的收藏库</h1>
     <!-- column count is set from the tile count: the 未到货 tile only appears
          when something is on its way, and auto-fit would wrap it to 4+1. -->
-    <div class="dash-metrics" style="--cols:${onWay.length ? 5 : 4}">
-      <div class="metric"><div class="mv">${total}</div><div class="ml">总收录</div></div>
-      <a href="#/mine" class="metric"><div class="mv ok">${owned.length}</div><div class="ml">已拥有 ›</div></a>
-      ${onWay.length ? `<a href="#/mine" class="metric"><div class="mv way">${onWay.length}</div><div class="ml">未到货 ›</div></a>` : ''}
-      <a href="#/mine" class="metric"><div class="mv want">${wish.length}</div><div class="ml">想要 ›</div></a>
-      <div class="metric"><div class="mv">${spent ? fmtPrice(spent) : '¥0'}</div><div class="ml">已投入</div></div>
-    </div>
+    ${heroHTML({ total, owned: owned.length, onWay: onWay.length, wish: wish.length, spent })}
     ${upcomingHTML}
     ${sections}
   </div>`;
@@ -555,9 +579,11 @@ function renderCollectionPage() {
     .concat(state.cats.map(c => ({ k: c, l: c, n: catCounts[c] || 0 })));
   $('main').innerHTML = `
     <div class="series-page" style="--accent:${col.color}">
-      <div class="head">
-        <h1 style="color:${col.color}">${col.code}</h1>
-        <span class="sub">${escapeHtml(col.name)}${col.tagline ? ' · ' + escapeHtml(col.tagline) : ''} · 共 ${counts.all} 件 · 已收集 <span id="owned-count">${owned}</span></span>
+      <div class="head col-head">
+        <h1>${col.code}</h1>
+        <span class="sub">${escapeHtml(col.name)}${col.tagline ? ' · ' + escapeHtml(col.tagline) : ''}</span>
+        <span class="col-tally"><b id="owned-count">${owned}</b> / ${counts.all} 已收集</span>
+        <div class="col-bar"><i style="width:${counts.all ? Math.round(100 * owned / counts.all) : 0}%"></i></div>
         <div class="head-actions">
           <span class="save-state" id="save-state"></span>
           <div class="view-toggle">

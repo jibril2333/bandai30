@@ -125,6 +125,57 @@ button.ghost-sm {
 .landing { max-width: 1400px; margin: 30px auto; padding: 0 24px; }
 .landing h1 { font-size: 22px; margin-bottom: 6px; font-weight: 700; }
 .landing .lede { color: var(--text-dim); font-size: 13px; margin-bottom: 24px; }
+
+/* --- dashboard hero --- */
+/* Deliberately dark in BOTH themes. The page around it is a wall of white
+   product shots; the one place worth looking at first should not also be
+   white. Everything inside is self-contained, so it needs no theme variants. */
+.hero {
+  position: relative; overflow: hidden;
+  border-radius: 18px; padding: 22px 24px 20px; margin: 16px 0 26px;
+  background:
+    radial-gradient(120% 160% at 88% -30%, rgba(232,70,122,.55), transparent 60%),
+    linear-gradient(135deg, #191320 0%, #241628 55%, #2e1526 100%);
+  color: #fff;
+  box-shadow: 0 10px 30px -12px rgba(0,0,0,.45);
+}
+.hero-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.hero-cap { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; opacity: .6; }
+.hero-num {
+  font-size: 40px; font-weight: 700; line-height: 1.05; letter-spacing: -.025em;
+  font-variant-numeric: tabular-nums; margin-top: 2px;
+}
+.hero-count { font-size: 13px; opacity: .8; }
+.hero-count b { font-size: 22px; font-weight: 700; margin-right: 6px; font-variant-numeric: tabular-nums; }
+
+/* One bar for the whole catalogue: what you have, what is coming, what you
+   want, and how much of it you have never touched. */
+.hero-bar {
+  display: flex; gap: 2px; height: 9px; margin: 18px 0 12px;
+  border-radius: 5px; overflow: hidden; background: rgba(255,255,255,.07);
+}
+.hero-bar i { display: block; height: 100%; transition: width .5s var(--ease); }
+.hero-bar .own  { background: #10b981; }
+.hero-bar .way  { background: #f97316; }
+.hero-bar .want { background: #a855f7; }
+.hero-bar .rest { background: rgba(255,255,255,.13); }
+
+.hero-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; }
+.hl { color: rgba(255,255,255,.62); text-decoration: none; display: flex; align-items: baseline; gap: 5px; }
+.hl::before { content: ""; width: 7px; height: 7px; border-radius: 50%; align-self: center; }
+.hl.own::before  { background: #10b981; }
+.hl.way::before  { background: #f97316; }
+.hl.want::before { background: #a855f7; }
+.hl.rest::before { background: rgba(255,255,255,.25); }
+.hl b { color: #fff; font-weight: 600; font-variant-numeric: tabular-nums; }
+a.hl:hover { color: #fff; }
+
+@media (max-width: 600px) {
+  .hero { padding: 18px 16px 16px; border-radius: 14px; }
+  .hero-num { font-size: 32px; }
+  .hero-legend { gap: 12px; }
+}
+
 /* --- dashboard --- */
 .dash h1 { margin-bottom: 4px; }
 /* --cols is set inline per render: 4 tiles normally, 5 when 未到货 shows. */
@@ -145,7 +196,11 @@ a.metric:hover { border-color: var(--primary); }
 .uc-photo { width: 118px; height: 118px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
 .uc-photo img { width: 100%; height: 100%; object-fit: cover; }
 .uc-photo.noimg::after { content: "🖼"; font-size: 26px; opacity: .25; }
+.uc-photo img { transition: transform .45s var(--ease); }
+.upcoming-card { transition: transform .15s var(--ease); }
+.upcoming-card:hover { transform: translateY(-3px); }
 .upcoming-card:hover .uc-photo { border-color: var(--primary); }
+.upcoming-card:hover .uc-photo img { transform: scale(1.07); }
 .uc-name { font-size: 11.5px; font-weight: 500; margin-top: 7px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .uc-meta { display: flex; justify-content: space-between; gap: 6px; font-size: 11px; color: var(--text-dim); margin-top: 3px; }
 .uc-date { color: var(--primary); font-weight: 600; white-space: nowrap; }
@@ -168,8 +223,21 @@ a.metric:hover { border-color: var(--primary); }
   content: ""; position: absolute; top: 0; left: 0; right: 0; height: 4px;
   background: var(--accent);
 }
-.series-card:hover { border-color: var(--accent); box-shadow: var(--shadow); }
-.series-card .code { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; color: var(--accent); }
+.series-card::after {
+  /* A wash of the brand colour, so the card reads as belonging to that line
+     rather than as a white box with a coloured stripe glued on top. */
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(90% 120% at 100% 0%, var(--accent), transparent 62%);
+  opacity: .07; transition: opacity .18s var(--ease);
+}
+.series-card:hover::after { opacity: .16; }
+.series-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 12px 28px -14px var(--accent), var(--shadow);
+  transform: translateY(-3px);
+}
+.series-card > * { position: relative; z-index: 1; }
+.series-card .code { font-size: 25px; font-weight: 700; letter-spacing: -0.01em; color: var(--accent); }
 .series-card .tagline { font-size: 12.5px; color: var(--text-dim); margin: 4px 0 12px; }
 .series-card .row { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--text-dim); margin-top: 6px; }
 .series-card .row b { color: var(--text); font-weight: 600; }
@@ -179,6 +247,39 @@ a.metric:hover { border-color: var(--primary); }
 .series-card .progress .bar { height: 100%; background: var(--accent); border-radius: 3px; transition: width .3s; }
 
 /* --- series page --- */
+/* The same idea as the dashboard hero, compressed: the line's own colour, its
+   name, and how far along you are — rather than one grey sentence. */
+.col-head {
+  position: relative; align-items: center;
+  padding: 20px 22px; margin: 18px 0 16px;
+  border-radius: 16px; overflow: hidden;
+  background: var(--card); border: 1px solid var(--border);
+}
+.col-head::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(80% 150% at 0% 0%, var(--accent), transparent 58%);
+  opacity: .13;
+}
+.col-head > * { position: relative; z-index: 1; }
+.col-head h1 { color: var(--accent); font-size: 28px; letter-spacing: -.02em; }
+.col-head .sub { font-size: 13px; }
+.col-tally { font-size: 13px; color: var(--text-dim); margin-left: auto; }
+.col-head .head-actions { order: 5; margin-left: 14px; }
+.col-tally b { color: var(--text); font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.col-bar {
+  /* flex-basis:100% forces its own line; without an explicit order the view
+     toggle that follows it in the DOM gets pushed to a third line. */
+  order: 10;
+  flex-basis: 100%; height: 5px; margin-top: 12px;
+  background: var(--s-none-bg); border-radius: 3px; overflow: hidden;
+}
+.col-bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width .5s var(--ease); }
+@media (max-width: 600px) {
+  .col-head { padding: 16px; border-radius: 12px; }
+  .col-head h1 { font-size: 22px; }
+  .col-tally { margin-left: 0; }
+}
+
 .series-page { max-width: 1400px; margin: 0 auto; padding: 0 24px; }
 .series-page .head { padding: 22px 0 14px; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
 .series-page h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
@@ -320,7 +421,11 @@ a.metric:hover { border-color: var(--primary); }
   position: relative; width: 100%; aspect-ratio: 1; background: var(--bg); overflow: hidden;
   display: flex; align-items: center; justify-content: center;
 }
-.card .photo img { width: 100%; height: 100%; object-fit: cover; }
+.card .photo img {
+  width: 100%; height: 100%; object-fit: cover;
+  transition: transform .45s var(--ease);
+}
+.card:hover .photo img { transform: scale(1.06); }
 .card .photo.noimg::after {
   content: "🖼"; font-size: 30px; opacity: .25;
 }
