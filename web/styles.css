@@ -584,6 +584,13 @@ a.metric:hover { border-color: var(--primary); }
 }
 
 /* --- settings page --- */
+/* A form is not a grid. .landing is 1400px because the collection pages want
+   every column they can get; at that width each control is flung to the far
+   edge of its row, leaving a lane of nothing between it and the label it
+   belongs to — 300px of travel for the eye on every line.
+   560px is set by the content: it is where the descriptions still fit on one
+   line and the text inputs still take their full 340px. */
+.settings { max-width: 560px; }
 .settings .lede { margin-bottom: 20px; }
 .set-card {
   background: var(--card); border: 1px solid var(--border); border-radius: 14px;
