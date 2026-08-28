@@ -144,11 +144,18 @@ button.ghost-sm {
    right left a thousand pixels of nothing between them on a wide screen. */
 .hero-stats { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .hs {
-  flex: 1 1 0; min-width: 84px; text-decoration: none; color: inherit;
+  /* Centred, not left-aligned: the counts are 1 to 3 digits wide, and
+     left-aligning them in equal columns left a different amount of air after
+     each one — a ragged edge down the middle of the band. */
+  flex: 1 1 0; min-width: 84px; text-align: center;
+  text-decoration: none; color: inherit;
   border-left: 1px solid rgba(255,255,255,.16); padding-left: 18px;
 }
 .hs:first-child { border-left: none; padding-left: 0; }
-.hs-money { flex: 2 1 190px; }
+/* The money keeps its natural width and stays left, so it lines up with the
+   hero's own padding and with the page heading above it. The counts divide
+   whatever is left. */
+.hs-money { flex: 0 1 auto; text-align: left; padding-right: 26px; }
 .hs-n {
   font-size: 25px; font-weight: 700; line-height: 1.1; letter-spacing: -.02em;
   font-variant-numeric: tabular-nums;
@@ -186,7 +193,7 @@ a.hs:hover { opacity: .72; }
   .hero { padding: 16px 14px 14px; border-radius: 14px; }
   .hero-stats { gap: 8px; }
   .hs { flex: 1 1 0; min-width: 0; border-left: none; padding-left: 0; }
-  .hs-money { flex: 1 1 100%; margin-bottom: 4px; }
+  .hs-money { flex: 1 1 100%; margin-bottom: 4px; padding-right: 0; }
   .hs-money .hs-n { font-size: 30px; }
   .hs-n { font-size: 19px; }
   .hs-l { font-size: 10.5px; margin-top: 3px; letter-spacing: .02em; }
