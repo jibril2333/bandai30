@@ -127,18 +127,23 @@ button.ghost-sm {
 .landing .lede { color: var(--text-dim); font-size: 13px; margin-bottom: 24px; }
 
 /* --- dashboard hero --- */
-/* Deliberately dark in BOTH themes. The page around it is a wall of white
-   product shots; the one place worth looking at first should not also be
-   white. Everything inside is self-contained, so it needs no theme variants. */
+/* Follows the theme, like everything else on the page. It was fixed dark on
+   the argument that the surroundings are a wall of white product shots and the
+   first thing you look at should not also be white — but a band that stays
+   black when the app goes light is simply the one element ignoring the switch.
+   The presence comes from the accent wash and the type instead. */
 .hero {
   position: relative; overflow: hidden;
   border-radius: 18px; padding: 22px 26px 20px; margin: 16px 0 26px;
-  background:
-    radial-gradient(120% 160% at 88% -30%, rgba(232,70,122,.55), transparent 60%),
-    linear-gradient(135deg, #191320 0%, #241628 55%, #2e1526 100%);
-  color: #fff;
-  box-shadow: 0 10px 30px -12px rgba(0,0,0,.45);
+  background: var(--card); border: 1px solid var(--border);
+  box-shadow: var(--shadow); color: var(--text);
 }
+.hero::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(110% 150% at 92% -20%, var(--primary), transparent 62%);
+  opacity: .13;
+}
+.hero > * { position: relative; z-index: 1; }
 
 /* The stats run the width of the band. Pinning one number left and another
    right left a thousand pixels of nothing between them on a wide screen. */
@@ -152,7 +157,7 @@ button.ghost-sm {
      each one — a ragged edge down the middle of the band. */
   flex: 1 1 0; min-width: 84px; text-align: center;
   text-decoration: none; color: inherit;
-  border-left: 1px solid rgba(255,255,255,.16); padding-left: 18px;
+  border-left: 1px solid var(--border); padding-left: 18px;
 }
 .hs:first-child { border-left: none; padding-left: 0; }
 /* The lead keeps its natural width and stays left, so it lines up with the
@@ -175,11 +180,14 @@ button.ghost-sm {
   font-size: 25px; font-weight: 700; line-height: 1.1; letter-spacing: -.02em;
   font-variant-numeric: tabular-nums;
 }
-.hs-l { font-size: 11.5px; letter-spacing: .06em; opacity: .55; margin-top: 5px; }
-.hs.own  .hs-n { color: #34d399; }
-.hs.way  .hs-n { color: #fb923c; }
-.hs.want .hs-n { color: #c084fc; }
-.hs.all  .hs-n { color: rgba(255,255,255,.5); }
+.hs-l { font-size: 11.5px; letter-spacing: .06em; color: var(--text-dim); margin-top: 5px; }
+/* The status palette already carries a light and a dark value for each of
+   these, so reusing it keeps the hero, the collection headers and the status
+   chips telling one colour story. */
+.hs.own  .hs-n { color: var(--s-done-fg); }
+.hs.way  .hs-n { color: var(--s-ordered-fg); }
+.hs.want .hs-n { color: var(--s-wishlist-fg); }
+.hs.all  .hs-n { color: var(--text-dim); }
 a.hs { transition: opacity .15s; }
 a.hs:hover { opacity: .72; }
 
@@ -188,15 +196,15 @@ a.hs:hover { opacity: .72; }
 .hero-progress { display: flex; align-items: center; gap: 14px; margin-top: 20px; }
 .hero-bar {
   flex: 1; display: flex; gap: 2px; height: 7px;
-  border-radius: 4px; overflow: hidden; background: rgba(255,255,255,.09);
+  border-radius: 4px; overflow: hidden; background: var(--s-none-bg);
 }
 .hero-bar i { display: block; height: 100%; transition: width .5s var(--ease); }
-.hero-bar .own  { background: #34d399; }
-.hero-bar .way  { background: #fb923c; }
-.hero-bar .want { background: #c084fc; }
+.hero-bar .own  { background: var(--s-done-fg); }
+.hero-bar .way  { background: var(--s-ordered-fg); }
+.hero-bar .want { background: var(--s-wishlist-fg); }
 .hero-bar .rest { background: transparent; }
 .hero-pct {
-  font-size: 11.5px; opacity: .55; white-space: nowrap;
+  font-size: 11.5px; color: var(--text-dim); white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
@@ -302,20 +310,12 @@ a.metric:hover { border-color: var(--primary); }
 }
 .col-head > * { position: relative; z-index: 1; }
 .col-head h1 { color: var(--accent); font-size: 28px; letter-spacing: -.02em; line-height: 1.15; }
-/* Same component as the dashboard hero, but that band paints its own dark
-   background and colours its text for it. This one sits on the page, so every
-   colour has to come back to the theme — otherwise the white-on-dark numbers
-   go invisible on a light page, which is exactly what happened. */
-.col-head .hs { border-left-color: var(--border); }
+/* Identical to the dashboard band now that both take their colours from the
+   theme; the only difference left is scale, and that 已收集 and its bar wear
+   the line's own colour rather than the shared green. */
 .col-head .hs-n { font-size: 21px; }
-.col-head .hs-l { opacity: 1; color: var(--text-dim); }
-.col-head .hs.own  .hs-n { color: var(--accent); }
-.col-head .hs.way  .hs-n { color: var(--s-ordered-fg); }
-.col-head .hs.want .hs-n { color: #a855f7; }
-.col-head .hs.all  .hs-n { color: var(--text-dim); }
-.col-head .hero-bar { background: var(--s-none-bg); }
+.col-head .hs.own .hs-n { color: var(--accent); }
 .col-head .hero-bar .own { background: var(--accent); }
-.col-head .hero-pct { color: var(--text-dim); opacity: 1; }
 @media (max-width: 700px) {
   .col-head { padding: 16px; border-radius: 12px; }
   .col-head h1 { font-size: 22px; }
