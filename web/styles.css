@@ -142,7 +142,10 @@ button.ghost-sm {
 
 /* The stats run the width of the band. Pinning one number left and another
    right left a thousand pixels of nothing between them on a wide screen. */
-.hero-stats { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+/* nowrap on purpose: the stat cells are flex:1 1 0, so they grow into every
+   spare pixel and push anything after them onto a line of its own. The cells
+   can shrink instead — they have no intrinsic width to defend. */
+.hero-stats { display: flex; align-items: baseline; gap: 12px; flex-wrap: nowrap; }
 .hs {
   /* Centred, not left-aligned: the counts are 1 to 3 digits wide, and
      left-aligning them in equal columns left a different amount of air after
@@ -152,15 +155,26 @@ button.ghost-sm {
   border-left: 1px solid rgba(255,255,255,.16); padding-left: 18px;
 }
 .hs:first-child { border-left: none; padding-left: 0; }
-/* The money keeps its natural width and stays left, so it lines up with the
-   hero's own padding and with the page heading above it. The counts divide
+/* The lead keeps its natural width and stays left, so it lines up with the
+   band's own padding and with the page heading above it. The counts divide
    whatever is left. */
-.hs-money { flex: 0 1 auto; text-align: left; padding-right: 26px; }
+.hs-lead { flex: 0 1 auto; text-align: left; padding-right: 26px; min-width: 0; }
+/* A tagline that wraps to a second line pushes the whole band taller and
+   breaks mid-word; one that truncates just gets shorter. */
+.hs-lead .hs-l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hs-money { font-size: 40px; letter-spacing: -.03em; }
+/* The toggle is a control, not a statistic: it keeps its natural width and
+   takes no border. Taking it out of the flow instead just parked it on top of
+   the last column — the row not wrapping is what actually reserves its
+   space. */
+.hs-trail {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+  border-left: none; padding-left: 22px;
+}
 .hs-n {
   font-size: 25px; font-weight: 700; line-height: 1.1; letter-spacing: -.02em;
   font-variant-numeric: tabular-nums;
 }
-.hs-money .hs-n { font-size: 40px; letter-spacing: -.03em; }
 .hs-l { font-size: 11.5px; letter-spacing: .06em; opacity: .55; margin-top: 5px; }
 .hs.own  .hs-n { color: #34d399; }
 .hs.way  .hs-n { color: #fb923c; }
@@ -191,10 +205,11 @@ a.hs:hover { opacity: .72; }
      them 2x2 under the money made the band eat half the screen on every
      visit. */
   .hero { padding: 16px 14px 14px; border-radius: 14px; }
-  .hero-stats { gap: 8px; }
+  .hero-stats { gap: 8px; flex-wrap: wrap; }
   .hs { flex: 1 1 0; min-width: 0; border-left: none; padding-left: 0; }
-  .hs-money { flex: 1 1 100%; margin-bottom: 4px; padding-right: 0; }
-  .hs-money .hs-n { font-size: 30px; }
+  .hs-lead { flex: 1 1 100%; margin-bottom: 4px; padding-right: 0; }
+  .hs-money { font-size: 30px; }
+  .hs-trail { order: 99; margin-top: 10px; padding-left: 0; }
   .hs-n { font-size: 19px; }
   .hs-l { font-size: 10.5px; margin-top: 3px; letter-spacing: .02em; }
   .hero-progress { margin-top: 14px; gap: 10px; }
@@ -286,23 +301,25 @@ a.metric:hover { border-color: var(--primary); }
   opacity: .13;
 }
 .col-head > * { position: relative; z-index: 1; }
-.col-head h1 { color: var(--accent); font-size: 28px; letter-spacing: -.02em; }
-.col-head .sub { font-size: 13px; }
-.col-tally { font-size: 13px; color: var(--text-dim); margin-left: auto; }
-.col-head .head-actions { order: 5; margin-left: 14px; }
-.col-tally b { color: var(--text); font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.col-bar {
-  /* flex-basis:100% forces its own line; without an explicit order the view
-     toggle that follows it in the DOM gets pushed to a third line. */
-  order: 10;
-  flex-basis: 100%; height: 5px; margin-top: 12px;
-  background: var(--s-none-bg); border-radius: 3px; overflow: hidden;
-}
-.col-bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width .5s var(--ease); }
-@media (max-width: 600px) {
+.col-head h1 { color: var(--accent); font-size: 28px; letter-spacing: -.02em; line-height: 1.15; }
+/* Same component as the dashboard hero, but that band paints its own dark
+   background and colours its text for it. This one sits on the page, so every
+   colour has to come back to the theme — otherwise the white-on-dark numbers
+   go invisible on a light page, which is exactly what happened. */
+.col-head .hs { border-left-color: var(--border); }
+.col-head .hs-n { font-size: 21px; }
+.col-head .hs-l { opacity: 1; color: var(--text-dim); }
+.col-head .hs.own  .hs-n { color: var(--accent); }
+.col-head .hs.way  .hs-n { color: var(--s-ordered-fg); }
+.col-head .hs.want .hs-n { color: #a855f7; }
+.col-head .hs.all  .hs-n { color: var(--text-dim); }
+.col-head .hero-bar { background: var(--s-none-bg); }
+.col-head .hero-bar .own { background: var(--accent); }
+.col-head .hero-pct { color: var(--text-dim); opacity: 1; }
+@media (max-width: 700px) {
   .col-head { padding: 16px; border-radius: 12px; }
   .col-head h1 { font-size: 22px; }
-  .col-tally { margin-left: 0; }
+  .col-head .hs-n { font-size: 19px; }
 }
 
 .series-page { max-width: 1400px; margin: 0 auto; padding: 0 24px; }

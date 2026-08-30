@@ -215,33 +215,48 @@ updateThemeBtn();
 // count pinned to the right — which on a wide screen left a thousand pixels of
 // nothing between them, and printed the owned count twice. The stats now run
 // across the band, so the width carries content instead of a gap.
-function heroHTML({ total, owned, onWay, wish, spent }) {
-  const rest = Math.max(0, total - owned - onWay - wish);
-  const pct = total ? (100 * owned / total) : 0;
-  const seg = (n, cls) => n ? `<i class="${cls}" style="width:${100 * n / (total || 1)}%"></i>` : '';
-  // Only the marked ones lead anywhere: "收录" is the catalogue, not a filter.
-  const stat = (n, cls, label, href) => {
+// One stat row, used by the dashboard hero and by every collection header.
+// `lead` is the block that keeps its natural width on the left — the money, or
+// the line's name — and the rest divide what remains, centred over their own
+// labels. Centring matters: the numbers run one to three digits, and
+// left-aligning them in equal columns leaves a different amount of air after
+// each, which reads as a ragged edge down the middle of the band.
+function statRowHTML(lead, stats, trailing = '') {
+  const cell = ({ n, cls = '', label, href }) => {
     const body = `<div class="hs-n">${n}</div><div class="hs-l">${label}</div>`;
     return href ? `<a href="${href}" class="hs ${cls}">${body}</a>` : `<div class="hs ${cls}">${body}</div>`;
   };
+  return `<div class="hero-stats">
+    <div class="hs hs-lead">${lead}</div>
+    ${stats.filter(Boolean).map(cell).join('')}
+    ${trailing ? `<div class="hs hs-trail">${trailing}</div>` : ''}
+  </div>`;
+}
+
+// A bar segmented by status, plus the share it represents.
+function progressHTML(segments, label) {
+  const bars = segments.filter(s => s.n).map(s =>
+    `<i class="${s.cls}" style="width:${s.pct}%"></i>`).join('');
+  return `<div class="hero-progress"><div class="hero-bar">${bars}</div><div class="hero-pct">${label}</div></div>`;
+}
+
+function heroHTML({ total, owned, onWay, wish, spent }) {
+  const p = n => 100 * n / (total || 1);
   return `
   <div class="hero">
-    <div class="hero-stats">
-      <div class="hs hs-money">
-        <div class="hs-n">${spent ? fmtPrice(spent) : '¥0'}</div>
-        <div class="hs-l">已投入</div>
-      </div>
-      ${stat(owned, 'own', '已拥有', '#/mine')}
-      ${onWay ? stat(onWay, 'way', '未到货', '#/mine') : ''}
-      ${stat(wish, 'want', '想要', '#/mine')}
-      ${stat(total, 'all', '收录')}
-    </div>
-    <div class="hero-progress">
-      <div class="hero-bar">
-        ${seg(owned, 'own')}${seg(onWay, 'way')}${seg(wish, 'want')}${seg(rest, 'rest')}
-      </div>
-      <div class="hero-pct">${pct.toFixed(1)}% 已收集</div>
-    </div>
+    ${statRowHTML(
+      `<div class="hs-n hs-money">${spent ? fmtPrice(spent) : '¥0'}</div><div class="hs-l">已投入</div>`,
+      [
+        { n: owned, cls: 'own', label: '已拥有', href: '#/mine' },
+        onWay ? { n: onWay, cls: 'way', label: '未到货', href: '#/mine' } : null,
+        { n: wish, cls: 'want', label: '想要', href: '#/mine' },
+        { n: total, cls: 'all', label: '收录' },
+      ])}
+    ${progressHTML(
+      [{ n: owned, cls: 'own', pct: p(owned) },
+       { n: onWay, cls: 'way', pct: p(onWay) },
+       { n: wish, cls: 'want', pct: p(wish) }],
+      `${p(owned).toFixed(1)}% 已收集`)}
   </div>`;
 }
 
@@ -585,18 +600,23 @@ function renderCollectionPage() {
     .concat(state.cats.map(c => ({ k: c, l: c, n: catCounts[c] || 0 })));
   $('main').innerHTML = `
     <div class="series-page" style="--accent:${col.color}">
-      <div class="head col-head">
-        <h1>${col.code}</h1>
-        <span class="sub">${escapeHtml(col.name)}${col.tagline ? ' · ' + escapeHtml(col.tagline) : ''}</span>
-        <span class="col-tally"><b id="owned-count">${owned}</b> / ${counts.all} 已收集</span>
-        <div class="col-bar"><i style="width:${counts.all ? Math.round(100 * owned / counts.all) : 0}%"></i></div>
-        <div class="head-actions">
-          <span class="save-state" id="save-state"></span>
-          <div class="view-toggle">
-            <button data-v="grid" class="${state.view === 'grid' ? 'active' : ''}" aria-label="网格视图">▦</button>
-            <button data-v="list" class="${state.view === 'list' ? 'active' : ''}" aria-label="列表视图">☰</button>
-          </div>
-        </div>
+      <div class="col-head">
+        ${statRowHTML(
+          `<h1>${escapeHtml(col.code)}</h1><div class="hs-l">${escapeHtml(col.name)}${col.tagline ? ' · ' + escapeHtml(col.tagline) : ''}</div>`,
+          [
+            { n: `<span id="owned-count">${owned}</span>`, cls: 'own', label: '已收集' },
+            counts.ordered ? { n: counts.ordered, cls: 'way', label: '未到货' } : null,
+            counts.wishlist ? { n: counts.wishlist, cls: 'want', label: '想要' } : null,
+            { n: counts.all, cls: 'all', label: '收录' },
+          ],
+          `<span class="save-state" id="save-state"></span>
+           <div class="view-toggle">
+             <button data-v="grid" class="${state.view === 'grid' ? 'active' : ''}" aria-label="网格视图">▦</button>
+             <button data-v="list" class="${state.view === 'list' ? 'active' : ''}" aria-label="列表视图">☰</button>
+           </div>`)}
+        ${progressHTML(
+          [{ n: owned, cls: 'own', pct: counts.all ? 100 * owned / counts.all : 0 }],
+          `${counts.all ? (100 * owned / counts.all).toFixed(1) : '0.0'}% 已收集`)}
       </div>
       <div class="filterbar${state.filterOpen ? ' open' : ''}">
         <div class="search-wrap">
