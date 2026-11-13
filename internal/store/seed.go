@@ -15,6 +15,15 @@ var DefaultCollections = []Collection{
 	{Code: "30MF", Slug: "30mf", Name: "30 Minutes Fantasy", Family: "30 Minutes",
 		Tagline: "奇幻", Color: "#16a34a", Scraper: "bandai-hobby", ScraperArg: "30mf", Type: "kit", SortOrder: 4},
 
+	// One collection across five brand listings. Splitting them into five
+	// collections would put the grade in the collection name and leave each
+	// collection's category filter with a single value; this way the grade IS
+	// the category, and the dashboard shows one card instead of five wildly
+	// unequal ones (HG alone is larger than everything else here combined).
+	{Code: "GUNPLA", Slug: "gunpla", Name: "ガンプラ", Family: "ガンプラ",
+		Tagline: "高达拼装", Color: "#dc2626", Scraper: "bandai-hobby",
+		ScraperArg: "hg,mg,rg,pg,mgsd", Type: "kit", SortOrder: 5},
+
 	{Code: "METAL BUILD", Slug: "metalbuild", Name: "METAL BUILD", Family: "Tamashii Nations",
 		Tagline: "高级合金成品", Color: "#b8860b", Scraper: "tamashii", ScraperArg: "metal_build", Type: "finished", SortOrder: 10},
 	{Code: "解体匠機", Slug: "kaitaishouki", Name: "METAL STRUCTURE 解体匠機", Family: "Tamashii Nations",

@@ -71,22 +71,40 @@ type Report struct {
 
 // scrapeBandaiHobby fetches every page of a bandai-hobby.net brand listing,
 // upserts items under the given series code, and downloads missing images.
-func (c *Client) scrapeBandaiHobby(ctx context.Context, brand, series string) (*Report, error) {
-	rep := &Report{Brand: brand}
-	maxPage, err := c.discoverPages(ctx, brand)
-	if err != nil {
-		return nil, fmt.Errorf("discover pages for %s: %w", brand, err)
-	}
+// brands is a comma-separated list of bandai-hobby brand slugs. One collection
+// can span several: ガンプラ is five listings (hg, mg, rg, pg, mgsd) that belong
+// in one place, with the grade kept as the item's category instead.
+//
+// A brand that fails to open costs its own listing and not the run — losing MG
+// should not also lose HG.
+func (c *Client) scrapeBandaiHobby(ctx context.Context, brands, series string) (*Report, error) {
+	rep := &Report{Brand: brands}
 	if err := os.MkdirAll(c.PhotosDir, 0o755); err != nil {
 		return nil, err
 	}
 	// Computed once per collection: hashing the photo dir per item would be
 	// wasteful, and a placeholder that appears mid-run can wait for the next.
 	shared := c.sharedCovers()
-	for p := 1; p <= maxPage; p++ {
-		if err := c.scrapePage(ctx, brand, series, p, rep, shared); err != nil {
-			rep.Failures = append(rep.Failures, fmt.Sprintf("page %d: %v", p, err))
+	var opened int
+	for _, brand := range strings.Split(brands, ",") {
+		brand = strings.TrimSpace(brand)
+		if brand == "" {
+			continue
 		}
+		maxPage, err := c.discoverPages(ctx, brand)
+		if err != nil {
+			rep.Failures = append(rep.Failures, fmt.Sprintf("discover pages for %s: %v", brand, err))
+			continue
+		}
+		opened++
+		for p := 1; p <= maxPage; p++ {
+			if err := c.scrapePage(ctx, brand, series, p, rep, shared); err != nil {
+				rep.Failures = append(rep.Failures, fmt.Sprintf("%s page %d: %v", brand, p, err))
+			}
+		}
+	}
+	if opened == 0 {
+		return nil, fmt.Errorf("no brand listing opened for %q", brands)
 	}
 	return rep, nil
 }
@@ -333,9 +351,54 @@ func (c *Client) fallbackImage(ctx context.Context, itemID string) (string, erro
 // The rules were derived from the full JP catalogue and checked against the
 // 423 items whose category was already known from the English names: all 423
 // land in the same bucket.
+// foldWidth maps full-width Latin letters and digits to their ASCII
+// equivalents. Bandai's catalogue mixes the two freely inside one listing —
+// "MG 1/100 グフ" and "ＭＧ 1/100 ガンダムアストレア" are both MG kits, and 27% of a
+// 161-title sample carried full-width characters. Matching the raw string
+// would file roughly a quarter of the catalogue under the wrong grade.
+//
+// Done by hand rather than with golang.org/x/text: this is a dependency-light
+// pure-Go binary and this is the only place that needs the mapping.
+func foldWidth(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'Ａ' && r <= 'Ｚ', r >= 'ａ' && r <= 'ｚ', r >= '０' && r <= '９':
+			return r - 0xFEE0
+		case r == '\u3000':
+			return ' '
+		}
+		return r
+	}, s)
+}
+
+// gunplaGrades is longest-prefix-first: MGSD and MGEX must be tested before MG,
+// or every one of them files as MG.
+var gunplaGrades = []string{"MGSD", "MGEX", "HGUC", "RG", "PG", "MG", "HG", "EG", "SD"}
+
+// gunplaGrade reads the grade off the product name, which carries it as the
+// first token in 160 of 161 sampled titles.
+//
+// Taken from the name rather than from the brand listing the item arrived in,
+// even though the scraper knows that: Categorize is also reached by
+// -recategorize and -fetch-item, neither of which has a brand, and a category
+// that depended on how a row was discovered would disagree with itself.
+func gunplaGrade(name string) string {
+	u := strings.ToUpper(strings.TrimSpace(foldWidth(name)))
+	for _, g := range gunplaGrades {
+		if u == g || strings.HasPrefix(u, g+" ") || strings.HasPrefix(u, g+"1/") {
+			return g
+		}
+	}
+	return "その他"
+}
+
 func Categorize(name, series string) string {
 	u := strings.ToUpper(name)
 	switch {
+	// Gunpla first: the decal and hand-part branches below are not gated on
+	// series, and a Gunpla decal set should still read as its grade.
+	case series == "GUNPLA":
+		return gunplaGrade(name)
 	case strings.Contains(name, "オプションボディパーツ"):
 		return "Option Body"
 	// "オプションヘアスタイル&フェイスパーツセット" is filed under hair, so this
