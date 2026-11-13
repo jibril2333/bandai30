@@ -20,9 +20,29 @@ func TestGunplaGrade(t *testing.T) {
 		// MGSD and MGEX must not be swallowed by the MG prefix.
 		{"MGSD フリーダムガンダム", "MGSD"},
 		{"ＭＧＳＤ ストライクフリーダムガンダム", "MGSD"},
-		{"MGEX 1/100 ユニコーンガンダム Ver.Ka", "MGEX"},
+		// MG Ver.Ka is its own listing, so it is its own category. The second
+		// one writes Ver.Ka with a FULL-WIDTH FULL STOP, which folding only
+		// letters and digits would leave as "Ver．Ka" and miss.
+		{"MG 1/100 フルアーマーZZガンダム Ver.Ka", "MG Ver.Ka"},
+		{"ＭＧ 1/100 ナラティブガンダム Ｂ装備 Ｖｅｒ．Ｋａ", "MG Ver.Ka"},
+		{"MG 1/100 シナンジュ・スタイン (ナラティブ Ver.) Ver.Ka", "MG Ver.Ka"},
+		{"MG 1/100 サザビー Ver.Ka [メカニカルクリア]", "MG Ver.Ka"},
+		// A plain MG stays MG.
+		{"MG 1/100 グフ Ver.2.0 [クリアカラー]", "MG"},
 
-		// No grade in the title: 1 of 161 sampled. Must not guess.
+		// MGEX wins over the Ver.Ka marker: these are MGEX kits that also say
+		// Ver.Ka in the title.
+		{"MGEX 1/100 ユニコーンガンダム Ver.Ka", "MGEX"},
+		{"MGEX 1/100 ユニコーンガンダム Ver．Ka ［プレミアム “ユニコーンモード” ボックス］", "MGEX"},
+		{"MGEX 1/100 マイティーストライクフリーダムガンダム", "MGEX"},
+
+		// Decal sheets name themselves before the grade they are for, so they
+		// never match a prefix. Seen live in the mgka listing.
+		{"ガンダムデカールNo.33 MG 1/100 クロスボーンガンダムX1（Ver.Ka）用", "デカール"},
+		// A kit whose title merely mentions decals still reads as its grade.
+		{"HG 1/144 ガンダムデカール", "HG"},
+
+		// No grade and no decal: 1 of 161 sampled. Must not guess.
 		{"『機動戦士ガンダム』特別企画", "その他"},
 	} {
 		if got := gunplaGrade(tc.name); got != tc.want {
@@ -44,7 +64,7 @@ func TestCategorizeGunplaBeatsPartBranches(t *testing.T) {
 }
 
 func TestFoldWidth(t *testing.T) {
-	if got := foldWidth("ＭＧ　1/100　ＲＸ－７８"); got != "MG 1/100 RX－78" {
+	if got := foldWidth("ＭＧ　1/100　ＲＸ－７８"); got != "MG 1/100 RX-78" {
 		t.Errorf("foldWidth = %q", got)
 	}
 }

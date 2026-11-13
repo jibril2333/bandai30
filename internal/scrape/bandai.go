@@ -362,7 +362,10 @@ func (c *Client) fallbackImage(ctx context.Context, itemID string) (string, erro
 func foldWidth(s string) string {
 	return strings.Map(func(r rune) rune {
 		switch {
-		case r >= 'Ａ' && r <= 'Ｚ', r >= 'ａ' && r <= 'ｚ', r >= '０' && r <= '９':
+		// The whole full-width ASCII block, not just letters and digits:
+		// "Ｖｅｒ．Ｋａ" carries a full-width FULL STOP, and folding only the
+		// letters leaves "Ver．Ka", which matches nothing.
+		case r >= '\uFF01' && r <= '\uFF5E':
 			return r - 0xFEE0
 		case r == '\u3000':
 			return ' '
@@ -386,8 +389,23 @@ func gunplaGrade(name string) string {
 	u := strings.ToUpper(strings.TrimSpace(foldWidth(name)))
 	for _, g := range gunplaGrades {
 		if u == g || strings.HasPrefix(u, g+" ") || strings.HasPrefix(u, g+"1/") {
+			// Ver.Ka has its own brand listing, so it is a line rather than a
+			// trim level on MG. MGSD and MGEX match earlier in the list and
+			// keep their own grade even when their title also says Ver.Ka —
+			// "MGEX 1/100 ユニコーンガンダム Ver.Ka" is an MGEX.
+			if g == "MG" && strings.Contains(u, "VER.KA") {
+				return "MG Ver.Ka"
+			}
 			return g
 		}
+	}
+	// Decal sheets are sold inside the grade listings but are not kits of that
+	// grade: "ガンダムデカールNo.33 MG 1/100 クロスボーンガンダムX1（Ver.Ka）用" is an
+	// accessory FOR an MG, and names itself before it names the grade, so it
+	// never matches a prefix. The ガンダムデカール line runs to hundreds of
+	// entries, which would otherwise pile up in the fallback.
+	if strings.Contains(u, "デカール") {
+		return "デカール"
 	}
 	return "その他"
 }

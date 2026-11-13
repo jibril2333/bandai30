@@ -22,7 +22,7 @@ var DefaultCollections = []Collection{
 	// unequal ones (HG alone is larger than everything else here combined).
 	{Code: "GUNPLA", Slug: "gunpla", Name: "ガンプラ", Family: "ガンプラ",
 		Tagline: "高达拼装", Color: "#dc2626", Scraper: "bandai-hobby",
-		ScraperArg: "hg,mg,rg,pg,mgsd", Type: "kit", SortOrder: 5},
+		ScraperArg: "hg,mg,rg,pg,mgsd,mgka,mgex", Type: "kit", SortOrder: 5},
 
 	{Code: "METAL BUILD", Slug: "metalbuild", Name: "METAL BUILD", Family: "Tamashii Nations",
 		Tagline: "高级合金成品", Color: "#b8860b", Scraper: "tamashii", ScraperArg: "metal_build", Type: "finished", SortOrder: 10},
@@ -43,7 +43,14 @@ func (s *Store) SeedCollections(ctx context.Context) (added int, err error) {
 		if ok {
 			added++
 		}
-		if _, e := s.DB.ExecContext(ctx, `UPDATE collections SET type=? WHERE code=?`, dc.Type, dc.Code); e != nil {
+		// Insert-if-absent leaves an existing row alone, so scraper settings
+		// have to be written back every boot: adding a brand slug to a
+		// collection that already exists would otherwise change nothing
+		// anywhere it is already deployed. Presentation (name, colour,
+		// tagline, order) is left as stored.
+		if _, e := s.DB.ExecContext(ctx,
+			`UPDATE collections SET type=?, scraper=?, scraper_arg=? WHERE code=?`,
+			dc.Type, dc.Scraper, dc.ScraperArg, dc.Code); e != nil {
 			return added, e
 		}
 	}
