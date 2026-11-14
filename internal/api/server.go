@@ -69,6 +69,8 @@ func (s *Server) Handler() http.Handler {
 	}
 	// Photos: gated behind auth (or open in NoAuth mode).
 	mux.Handle("GET /photos/{name}", authd(s.servePhoto))
+	// Downscaled copies for the grid; see thumb.go for why.
+	mux.Handle("GET /photos/thumb/{name}", authd(s.serveThumb))
 
 	mux.Handle("GET /api/items", authd(s.listItems))
 	mux.Handle("POST /api/items", authd(s.createItem))

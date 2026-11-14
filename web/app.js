@@ -302,7 +302,7 @@ async function renderLanding() {
       <div class="upcoming-row">
         ${upcoming.slice(0, 12).map(m => `
           <div class="upcoming-card" data-id="${escapeAttr(m.id)}">
-            <div class="uc-photo${m.photoUrl ? '' : ' noimg'}">${m.photoUrl ? `<img src="${escapeAttr(m.photoUrl)}" loading="lazy">` : ''}</div>
+            <div class="uc-photo${m.photoUrl ? '' : ' noimg'}">${m.photoUrl ? `<img src="${escapeAttr(thumbURL(m.photoUrl))}" loading="lazy" decoding="async">` : ''}</div>
             <div class="uc-name">${escapeHtml(m.nameZh || m.name)}</div>
             <div class="uc-meta"><span class="uc-date">${escapeHtml(m.releaseDate)}</span>${m.price ? `<span>${fmtPrice(m.price)}</span>` : ''}</div>
           </div>`).join('')}
@@ -909,6 +909,20 @@ function refreshChipActive() {
 }
 
 // shared card markup (used by collection grid + "my collection" page)
+// Grid cells are ~170px on a phone and the catalogue's own covers run to
+// 1500x1500. A decoded frame costs width*height*4 bytes whatever it is drawn
+// at, so a 2,000-card grid of originals decodes gigabytes — which pins the
+// main thread and leaves the page scrolling (that runs on the compositor)
+// while taps go unanswered. Every small rendition goes through here; the
+// detail view's main photo keeps the original.
+function thumbURL(u) {
+  if (!u || !u.startsWith('/photos/') || u.startsWith('/photos/thumb/')) return u;
+  const q = u.indexOf('?');
+  return q < 0
+    ? '/photos/thumb/' + u.slice(8)
+    : '/photos/thumb/' + u.slice(8, q) + u.slice(q);
+}
+
 function cardHTML(m, type, today) {
   const rd = m.releaseDate || '';
   const upcoming = rd && rd > today;
@@ -916,7 +930,7 @@ function cardHTML(m, type, today) {
   return `
     <div class="item card${m.status !== 'none' ? ' is-marked s-' + m.status : ''}" data-id="${escapeAttr(m.id)}" data-cat="${escapeAttr(m.category || '')}" data-status="${escapeAttr(m.status)}" data-search="${escapeAttr(search)}">
       <div class="photo${m.photoUrl ? '' : ' noimg'}">
-        ${m.photoUrl ? `<img src="${escapeAttr(m.photoUrl)}" loading="lazy" onerror="this.style.display='none';this.parentElement.classList.add('noimg')">` : ''}
+        ${m.photoUrl ? `<img src="${escapeAttr(thumbURL(m.photoUrl))}" loading="lazy" decoding="async" onerror="this.style.display='none';this.parentElement.classList.add('noimg')">` : ''}
         ${m.status !== 'none' ? `<span class="status-chip s-${m.status}">${statusLabel(m.status, type)}</span>` : ''}
         ${upcoming ? '<span class="soon-chip">未发售</span>' : ''}
         ${m.myPhotos ? `<span class="mine-chip" title="我拍的照片 ${m.myPhotos} 张">📷 ${m.myPhotos}</span>` : ''}
@@ -939,7 +953,7 @@ function rowHTML(m, type, today) {
   const search = `${m.name} ${m.nameZh} ${m.notes}`.toLowerCase();
   return `
     <div class="item row-item${m.status !== 'none' ? ' is-marked s-' + m.status : ''}" data-id="${escapeAttr(m.id)}" data-cat="${escapeAttr(m.category || '')}" data-status="${escapeAttr(m.status)}" data-search="${escapeAttr(search)}">
-      <div class="ri-photo${m.photoUrl ? '' : ' noimg'}">${m.photoUrl ? `<img src="${escapeAttr(m.photoUrl)}" loading="lazy" onerror="this.style.display='none';this.parentElement.classList.add('noimg')">` : ''}</div>
+      <div class="ri-photo${m.photoUrl ? '' : ' noimg'}">${m.photoUrl ? `<img src="${escapeAttr(thumbURL(m.photoUrl))}" loading="lazy" decoding="async" onerror="this.style.display='none';this.parentElement.classList.add('noimg')">` : ''}</div>
       <div class="ri-main">
         <div class="ri-name">${escapeHtml(m.name || m.nameZh || '(未命名)')}</div>
         <div class="ri-sub">${m.category ? escapeHtml(m.category) : ''}${rd ? `<span class="${upcoming ? 'upcoming' : ''}">${escapeHtml(rd)}${upcoming ? ' 未发售' : ''}</span>` : ''}</div>
@@ -1044,7 +1058,7 @@ async function loadGallery(id, cover) {
   }
   strip.innerHTML = galleryShots.map((u, i) =>
     `<button class="vthumb${i === 0 ? ' active' : ''}${i < mine.length ? ' vmine' : ''}" data-i="${i}" aria-label="第 ${i + 1} 张">
-       <img src="${escapeAttr(u)}" loading="lazy" alt=""></button>`).join('');
+       <img src="${escapeAttr(thumbURL(u))}" loading="lazy" decoding="async" alt=""></button>`).join('');
   strip.hidden = false;
   strip.querySelectorAll('.vthumb').forEach(b => {
     b.onclick = () => showShot(+b.dataset.i);
@@ -1061,7 +1075,7 @@ function renderMyPhotos(id) {
     <div class="mp-list">
       ${myPhotos.map(p => `
         <div class="mp-item" data-pid="${p.id}">
-          <img src="${escapeAttr(p.url)}" loading="lazy" alt="">
+          <img src="${escapeAttr(thumbURL(p.url))}" loading="lazy" decoding="async" alt="">
           <button class="mp-del" data-pid="${p.id}" aria-label="删除">×</button>
         </div>`).join('')}
       <button class="mp-add" id="mp-add" aria-label="添加照片">＋</button>
