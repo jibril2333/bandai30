@@ -36,14 +36,35 @@ func TestGunplaGrade(t *testing.T) {
 		{"MGEX 1/100 ユニコーンガンダム Ver．Ka ［プレミアム “ユニコーンモード” ボックス］", "MGEX"},
 		{"MGEX 1/100 マイティーストライクフリーダムガンダム", "MGEX"},
 
-		// Decal sheets name themselves before the grade they are for, so they
-		// never match a prefix. Seen live in the mgka listing.
+		// Decal sheets name themselves before the grade they are for. A kit
+		// whose title merely mentions decals states its grade first.
 		{"ガンダムデカールNo.33 MG 1/100 クロスボーンガンダムX1（Ver.Ka）用", "デカール"},
-		// A kit whose title merely mentions decals still reads as its grade.
+		{"ガンダムデカールNo.118 MG 1/100 ジム・スナイパーII/ジム・コマンド用", "デカール"},
 		{"HG 1/144 ガンダムデカール", "HG"},
 
-		// No grade and no decal: 1 of 161 sampled. Must not guess.
-		{"『機動戦士ガンダム』特別企画", "その他"},
+		// HG's series sub-brands are HG kits, not grades of their own. Filing
+		// them separately split HG across a dozen chips, eight under ten items.
+		{"HGUC 1/144 νガンダム", "HG"},
+		{"HGBF 1/144 ビルドストライクガンダム フルパッケージ", "HG"},
+		{"HGBD:R 1/144 コアガンダムII(ティターンズカラー)", "HG"},
+		{"HGPG 1/144 プチッガイ", "HG"},
+		{"HGCE 1/144 フリーダムガンダム", "HG"},
+		{"SDBF S×D×Gガンダム", "SD"},
+		{"ENTRY GRADE 1/144 RX-78-2 ガンダム", "EG"},
+
+		// The grade is not reliably the first token: store-limited and lottery
+		// markers push it along, and some titles lead with the scale.
+		{"【抽選販売】ＨＧ 1/144 ユニコーンガンダム（デストロイモード） Ver.NIKE SB", "HG"},
+		{"GUNDAM NEXT FUTURE限定 HG 1/144 ガンダムエアリアル", "HG"},
+		{"1/144 HG デスティニーガンダム", "HG"},
+
+		// U+00A0 NO-BREAK SPACE as the separator. One live title uses it, and a
+		// prefix test for "RG " does not match it.
+		{"RG\u00a01/144\u00a0νガンダム[クリアカラー] 初回生産限定パッケージ", "RG"},
+
+		// Genuinely gradeless: 6 of 2066 in the live catalogue.
+		{"GUNPLA 40th メモリアルセット", "その他"},
+		{"1/144 RX-79改 Ez8(08小隊版)", "その他"},
 	} {
 		if got := gunplaGrade(tc.name); got != tc.want {
 			t.Errorf("gunplaGrade(%q) = %q, want %q", tc.name, got, tc.want)

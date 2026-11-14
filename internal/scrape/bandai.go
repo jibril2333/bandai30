@@ -367,45 +367,113 @@ func foldWidth(s string) string {
 		// letters leaves "Ver．Ka", which matches nothing.
 		case r >= '\uFF01' && r <= '\uFF5E':
 			return r - 0xFEE0
-		case r == '\u3000':
+		// U+3000 IDEOGRAPHIC SPACE and U+00A0 NO-BREAK SPACE both appear as
+		// separators in the catalogue; "RG\u00A01/144 νガンダム" is one real title,
+		// and a prefix test for "RG " does not match it.
+		case r == '\u3000', r == '\u00A0':
 			return ' '
 		}
 		return r
 	}, s)
 }
 
-// gunplaGrades is longest-prefix-first: MGSD and MGEX must be tested before MG,
-// or every one of them files as MG.
-var gunplaGrades = []string{"MGSD", "MGEX", "HGUC", "RG", "PG", "MG", "HG", "EG", "SD"}
+// gunplaToken classifies one uppercase token from a product name. A line keeps
+// its own identity only when Bandai gives it its own brand listing — MGSD,
+// MGEX and MG Ver.Ka have one, HGUC/HGBF/HGBD/HGPG do not. They are HG kits
+// branded by the show they come from, and filing each separately split HG
+// across a dozen chips, eight of them under ten items.
+func gunplaToken(tok string) string {
+	switch tok {
+	case "MGSD", "MGEX":
+		return tok
+	case "MG", "RG", "PG", "EG":
+		return tok
+	}
+	// HGUC, HGBF, HGBC, HGBD, HGBD:R, HGPG, HGCE, HGAC, HGFC, HGAW, HGCC …
+	if strings.HasPrefix(tok, "HG") && isGradeSuffix(tok[2:]) {
+		return "HG"
+	}
+	if strings.HasPrefix(tok, "SD") && isGradeSuffix(tok[2:]) {
+		return "SD"
+	}
+	return ""
+}
 
-// gunplaGrade reads the grade off the product name, which carries it as the
-// first token in 160 of 161 sampled titles.
+// isGradeSuffix reports whether what follows a grade prefix is series branding
+// (letters, or the colon in HGBD:R) rather than the start of a model name.
+func isGradeSuffix(s string) bool {
+	for _, r := range s {
+		if (r < 'A' || r > 'Z') && r != ':' {
+			return false
+		}
+	}
+	return true
+}
+
+// gunplaTokens splits a folded, uppercased name into A-Z0-9: runs, keeping each
+// token's offset so the decal check below can tell what came first.
+func gunplaTokens(u string) (toks []string, at []int) {
+	start := -1
+	for i, r := range u {
+		isTok := (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == ':'
+		switch {
+		case isTok && start < 0:
+			start = i
+		case !isTok && start >= 0:
+			toks, at = append(toks, u[start:i]), append(at, start)
+			start = -1
+		}
+	}
+	if start >= 0 {
+		toks, at = append(toks, u[start:]), append(at, start)
+	}
+	return toks, at
+}
+
+// leadingBracket strips a 【…】 or 『…』 decoration. "【抽選販売】ＨＧ 1/144 …" is an
+// HG kit; the lottery-sale marker is not part of the grade.
+var leadingBracket = regexp.MustCompile(`^\s*(?:【[^】]*】|『[^』]*』)\s*`)
+
+// gunplaGrade reads the grade off the product name.
 //
 // Taken from the name rather than from the brand listing the item arrived in,
 // even though the scraper knows that: Categorize is also reached by
 // -recategorize and -fetch-item, neither of which has a brand, and a category
 // that depended on how a row was discovered would disagree with itself.
+//
+// The grade is not reliably the first token. Store-limited and lottery
+// prefixes push it along ("GUNDAM NEXT FUTURE限定 HG 1/144 …"), and some titles
+// lead with the scale ("1/144 HG デスティニーガンダム"), so the first grade token
+// anywhere wins rather than the first token being required to be one.
 func gunplaGrade(name string) string {
 	u := strings.ToUpper(strings.TrimSpace(foldWidth(name)))
-	for _, g := range gunplaGrades {
-		if u == g || strings.HasPrefix(u, g+" ") || strings.HasPrefix(u, g+"1/") {
-			// Ver.Ka has its own brand listing, so it is a line rather than a
-			// trim level on MG. MGSD and MGEX match earlier in the list and
-			// keep their own grade even when their title also says Ver.Ka —
-			// "MGEX 1/100 ユニコーンガンダム Ver.Ka" is an MGEX.
-			if g == "MG" && strings.Contains(u, "VER.KA") {
-				return "MG Ver.Ka"
-			}
-			return g
+	u = leadingBracket.ReplaceAllString(u, "")
+
+	toks, at := gunplaTokens(u)
+	grade, gradeAt := "", -1
+	for i, t := range toks {
+		if g := gunplaToken(t); g != "" {
+			grade, gradeAt = g, at[i]
+			break
+		}
+		// "ENTRY GRADE" is two tokens.
+		if t == "ENTRY" && i+1 < len(toks) && toks[i+1] == "GRADE" {
+			grade, gradeAt = "EG", at[i]
+			break
 		}
 	}
-	// Decal sheets are sold inside the grade listings but are not kits of that
-	// grade: "ガンダムデカールNo.33 MG 1/100 クロスボーンガンダムX1（Ver.Ka）用" is an
-	// accessory FOR an MG, and names itself before it names the grade, so it
-	// never matches a prefix. The ガンダムデカール line runs to hundreds of
-	// entries, which would otherwise pile up in the fallback.
-	if strings.Contains(u, "デカール") {
+
+	// A decal sheet names itself before it names the grade it is for:
+	// "ガンダムデカールNo.118 MG 1/100 ジム・スナイパーII用" is an accessory, not an MG.
+	// A kit that merely mentions decals states its grade first.
+	if d := strings.Index(u, "デカール"); d >= 0 && (gradeAt < 0 || d < gradeAt) {
 		return "デカール"
+	}
+	if grade == "MG" && strings.Contains(u, "VER.KA") {
+		return "MG Ver.Ka"
+	}
+	if grade != "" {
+		return grade
 	}
 	return "その他"
 }
