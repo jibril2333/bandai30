@@ -845,14 +845,60 @@ function wireToolbar() {
 
 // Build every card once. Filtering afterwards only toggles visibility, so the
 // 100+ <img> elements are never recreated/re-decoded — that's what was janky.
+// Images are mounted when they come near the viewport and UNMOUNTED when they
+// leave it. loading="lazy" only defers the first load: once an image has been
+// seen it stays decoded for as long as it is in the DOM, and a decoded frame
+// costs width*height*4 bytes. Scrolling the 2,066-card collection to the
+// bottom therefore accumulated about 1.4 GB, which a phone's renderer does not
+// have — the page kept scrolling, because that runs on the compositor, and
+// stopped answering taps. Smaller collections never reached the ceiling, which
+// is why only this one failed.
+//
+// 900px of margin on each side: far enough that an image is ready before it is
+// visible, close enough that the live set stays in the dozens.
+let imgObserver = null;
+
+function mountImages(root) {
+  if (imgObserver) imgObserver.disconnect();
+  if (!('IntersectionObserver' in window)) {
+    // No observer: load everything, as before. Better a heavy page than none.
+    root.querySelectorAll('img[data-src]').forEach(i => { i.src = i.dataset.src; });
+    return;
+  }
+  imgObserver = new IntersectionObserver(entries => {
+    for (const e of entries) {
+      const img = e.target;
+      if (e.isIntersecting) {
+        if (!img.getAttribute('src')) {
+          img.onerror = () => {
+            img.style.display = 'none';
+            if (img.parentElement) img.parentElement.classList.add('noimg');
+          };
+          img.src = img.dataset.src;
+        }
+      } else if (img.getAttribute('src')) {
+        // removeAttribute rather than src='': an empty src re-requests the
+        // page itself in some browsers and fires an error.
+        img.removeAttribute('src');
+      }
+    }
+  }, { rootMargin: '900px 0px' });
+  root.querySelectorAll('img[data-src]').forEach(i => imgObserver.observe(i));
+}
+
 function buildGrid() {
   const today = new Date().toISOString().slice(0, 10);
   const type = state.col.type;
   const grid = $('grid');
   const render = state.view === 'list' ? rowHTML : cardHTML;
   grid.innerHTML = state.items.map(m => render(m, type, today)).join('');
-  grid.querySelectorAll('.item').forEach(el => { el.onclick = () => openView(el.dataset.id); });
+  // One delegated listener instead of 2,066 closures.
+  grid.onclick = e => {
+    const el = e.target.closest('.item');
+    if (el && grid.contains(el)) openView(el.dataset.id);
+  };
   applyFilter();
+  mountImages(grid);
 }
 
 // Show/hide existing cards according to the current filter — no DOM rebuild.
@@ -884,8 +930,11 @@ function refreshCard(m) {
   const tmp = document.createElement('template');
   tmp.innerHTML = render(m, state.col.type, new Date().toISOString().slice(0, 10)).trim();
   const fresh = tmp.content.firstElementChild;
-  fresh.onclick = () => openView(m.id);
   el.replaceWith(fresh);
+  // The click is delegated on the grid, but the new image is not observed by
+  // anyone yet — without this the rebuilt card never loads its photo.
+  if (imgObserver) fresh.querySelectorAll('img[data-src]').forEach(i => imgObserver.observe(i));
+  else fresh.querySelectorAll('img[data-src]').forEach(i => { i.src = i.dataset.src; });
 }
 
 // Update the status-chip counts + "已收集 N" without rebuilding the toolbar.
@@ -930,7 +979,7 @@ function cardHTML(m, type, today) {
   return `
     <div class="item card${m.status !== 'none' ? ' is-marked s-' + m.status : ''}" data-id="${escapeAttr(m.id)}" data-cat="${escapeAttr(m.category || '')}" data-status="${escapeAttr(m.status)}" data-search="${escapeAttr(search)}">
       <div class="photo${m.photoUrl ? '' : ' noimg'}">
-        ${m.photoUrl ? `<img src="${escapeAttr(thumbURL(m.photoUrl))}" loading="lazy" decoding="async" onerror="this.style.display='none';this.parentElement.classList.add('noimg')">` : ''}
+        ${m.photoUrl ? `<img data-src="${escapeAttr(thumbURL(m.photoUrl))}" decoding="async" alt="">` : ''}
         ${m.status !== 'none' ? `<span class="status-chip s-${m.status}">${statusLabel(m.status, type)}</span>` : ''}
         ${upcoming ? '<span class="soon-chip">未发售</span>' : ''}
         ${m.myPhotos ? `<span class="mine-chip" title="我拍的照片 ${m.myPhotos} 张">📷 ${m.myPhotos}</span>` : ''}
@@ -953,7 +1002,7 @@ function rowHTML(m, type, today) {
   const search = `${m.name} ${m.nameZh} ${m.notes}`.toLowerCase();
   return `
     <div class="item row-item${m.status !== 'none' ? ' is-marked s-' + m.status : ''}" data-id="${escapeAttr(m.id)}" data-cat="${escapeAttr(m.category || '')}" data-status="${escapeAttr(m.status)}" data-search="${escapeAttr(search)}">
-      <div class="ri-photo${m.photoUrl ? '' : ' noimg'}">${m.photoUrl ? `<img src="${escapeAttr(thumbURL(m.photoUrl))}" loading="lazy" decoding="async" onerror="this.style.display='none';this.parentElement.classList.add('noimg')">` : ''}</div>
+      <div class="ri-photo${m.photoUrl ? '' : ' noimg'}">${m.photoUrl ? `<img data-src="${escapeAttr(thumbURL(m.photoUrl))}" decoding="async" alt="">` : ''}</div>
       <div class="ri-main">
         <div class="ri-name">${escapeHtml(m.name || m.nameZh || '(未命名)')}</div>
         <div class="ri-sub">${m.category ? escapeHtml(m.category) : ''}${rd ? `<span class="${upcoming ? 'upcoming' : ''}">${escapeHtml(rd)}${upcoming ? ' 未发售' : ''}</span>` : ''}</div>
