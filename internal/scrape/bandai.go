@@ -478,6 +478,38 @@ func gunplaGrade(name string) string {
 	return "その他"
 }
 
+// charaLine reads the product line off a character-kit title. The same idea
+// as gunplaGrade, against a different vocabulary: these collections are
+// organised by line, and the line is what the title leads with.
+func charaLine(name string) string {
+	u := strings.ToUpper(strings.TrimSpace(foldWidth(name)))
+	u = leadingBracket.ReplaceAllString(u, "")
+
+	// "Figure-rise Standard", "Figure-riseStandard" and "Figure rise" all
+	// occur; comparing with the spaces and hyphens removed covers all three.
+	// Amplified first — every Amplified title also says Standard.
+	flat := strings.NewReplacer(" ", "", "-", "").Replace(u)
+	if strings.Contains(flat, "FIGURERISE") {
+		if strings.Contains(flat, "AMPLIFIED") {
+			return "Amplified"
+		}
+		return "Figure-rise"
+	}
+
+	toks, _ := gunplaTokens(u)
+	for i, t := range toks {
+		switch {
+		case t == "ENTRY" && i+1 < len(toks) && toks[i+1] == "GRADE", t == "EG":
+			return "ENTRY GRADE"
+		case t == "RG", t == "MG", t == "PG":
+			return t
+		case strings.HasPrefix(t, "HG") && isGradeSuffix(t[2:]):
+			return "HG"
+		}
+	}
+	return "その他"
+}
+
 func Categorize(name, series string) string {
 	u := strings.ToUpper(name)
 	switch {
@@ -485,6 +517,8 @@ func Categorize(name, series string) string {
 	// series, and a Gunpla decal set should still read as its grade.
 	case series == "GUNPLA":
 		return gunplaGrade(name)
+	case series == "キャラプラ":
+		return charaLine(name)
 	case strings.Contains(name, "オプションボディパーツ"):
 		return "Option Body"
 	// "オプションヘアスタイル&フェイスパーツセット" is filed under hair, so this

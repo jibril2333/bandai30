@@ -89,3 +89,36 @@ func TestFoldWidth(t *testing.T) {
 		t.Errorf("foldWidth = %q", got)
 	}
 }
+
+// Titles taken verbatim from the five キャラクタープラモデル listings.
+func TestCharaLine(t *testing.T) {
+	for _, tc := range []struct{ name, want string }{
+		{"Figure-rise Standard Amplified マグナガルルモン", "Amplified"},
+		{"Figure-rise Standard Amplified -三幻神降臨- オシリスの天空竜", "Amplified"},
+		{"Figure-rise Standard ウルトラマン(ＢタイプVer.)", "Figure-rise"},
+		// Written without the space; comparing with spaces and hyphens removed
+		// is what covers it.
+		{"Figure-riseStandard 仮面ライダークウガ マイティフォーム", "Figure-rise"},
+
+		{"ＲＧ 汎用ヒト型決戦兵器 人造人間エヴァンゲリオン初号機", "RG"},
+		{"RG エヴァンゲリオン Mark.06", "RG"},
+		{"ENTRY GRADE 1/144 RX-78-2 ガンダム", "ENTRY GRADE"},
+		// HG's sub-brands are HG here too.
+		{"HGAB 1/144 ガンダムAGE-1", "HG"},
+		{"HG 1/144 ウルトラマン", "HG"},
+
+		// Full Metal Panic's 1/60 kits carry no line marker at all: 3 of 394.
+		{"1/60 アーバレスト Ver.IV", "その他"},
+	} {
+		if got := charaLine(tc.name); got != tc.want {
+			t.Errorf("charaLine(%q) = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+	// The Gunpla and 30-series rules are untouched by the new branch.
+	if got := Categorize("HGUC 1/144 νガンダム", "GUNPLA"); got != "HG" {
+		t.Errorf("GUNPLA regressed: %q", got)
+	}
+	if got := Categorize("Figure-rise Standard Amplified アグモン", "キャラプラ"); got != "Amplified" {
+		t.Errorf("Categorize did not reach charaLine: %q", got)
+	}
+}

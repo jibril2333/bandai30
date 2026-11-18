@@ -24,6 +24,18 @@ var DefaultCollections = []Collection{
 		Tagline: "高达拼装", Color: "#dc2626", Scraper: "bandai-hobby",
 		ScraperArg: "hg,mg,rg,pg,mgsd,mgka,mgex", Type: "kit", SortOrder: 5},
 
+	// Bandai's own キャラクタープラモデル section, which is five brand listings
+	// organised by line rather than by franchise. Taking the lines rather than
+	// /series/evangelion/ and /series/digimon/ matters: those are franchise
+	// views that cut across product lines, and items.series holds one value —
+	// a franchise collection would take the RG Evangelion and 30MP kits away
+	// from the collections that already hold them.
+	{Code: "キャラプラ", Slug: "charaplastic", Name: "キャラクタープラモデル",
+		Family: "キャラクタープラモデル", Tagline: "角色模型", Color: "#c026d3",
+		Scraper:    "bandai-hobby",
+		ScraperArg: "figurerise-standard,figurerise-standard-amp,hg-c,rg-c,entry_grade",
+		Type:       "kit", SortOrder: 6},
+
 	{Code: "METAL BUILD", Slug: "metalbuild", Name: "METAL BUILD", Family: "Tamashii Nations",
 		Tagline: "高级合金成品", Color: "#b8860b", Scraper: "tamashii", ScraperArg: "metal_build", Type: "finished", SortOrder: 10},
 	{Code: "解体匠機", Slug: "kaitaishouki", Name: "METAL STRUCTURE 解体匠機", Family: "Tamashii Nations",
