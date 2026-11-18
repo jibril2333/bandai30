@@ -20,13 +20,14 @@ func (s *Server) listItems(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
 	f := store.ItemFilter{
-		Series:   q.Get("series"),
-		Category: q.Get("category"),
-		Status:   q.Get("status"),
-		Marked:   q.Get("marked") == "1",
-		Search:   q.Get("q"),
-		Limit:    limit,
-		Offset:   offset,
+		Series:    q.Get("series"),
+		Category:  q.Get("category"),
+		Franchise: q.Get("franchise"),
+		Status:    q.Get("status"),
+		Marked:    q.Get("marked") == "1",
+		Search:    q.Get("q"),
+		Limit:     limit,
+		Offset:    offset,
 	}
 	items, err := s.Store.ListItems(ctxOf(r), f)
 	if err != nil {
@@ -163,6 +164,18 @@ func (s *Server) statsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, counts)
+}
+
+func (s *Server) franchisesHandler(w http.ResponseWriter, r *http.Request) {
+	fr, err := s.Store.FranchisesUsed(ctxOf(r), r.URL.Query().Get("series"))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if fr == nil {
+		fr = []string{}
+	}
+	writeJSON(w, http.StatusOK, fr)
 }
 
 func (s *Server) categoriesHandler(w http.ResponseWriter, r *http.Request) {

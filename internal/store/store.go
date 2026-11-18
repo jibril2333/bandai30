@@ -28,19 +28,21 @@ type Item struct {
 	Status      string `json:"status"`
 	Notes       string `json:"notes"`
 	PhotoURL    string `json:"photoUrl"`
+	Franchise   string `json:"franchise"`
 	CreatedAt   int64  `json:"createdAt"`
 	UpdatedAt   int64  `json:"updatedAt"`
 }
 
 // ItemFilter narrows ListItems results.
 type ItemFilter struct {
-	Series   string
-	Category string
-	Status   string
-	Marked   bool   // only items the user has marked (status != 'none')
-	Search   string // matches name / nameZh / notes (case-insensitive)
-	Limit    int
-	Offset   int
+	Series    string
+	Category  string
+	Franchise string
+	Status    string
+	Marked    bool   // only items the user has marked (status != 'none')
+	Search    string // matches name / nameZh / notes (case-insensitive)
+	Limit     int
+	Offset    int
 }
 
 type Store struct {
@@ -75,6 +77,18 @@ func (s *Store) migrate(ctx context.Context) error {
 		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE item_photos ADD COLUMN src TEXT NOT NULL DEFAULT ''`); err != nil {
 			return err
 		}
+	}
+	// items.franchise records the work a kit is from, which the product-line
+	// listings do not carry.
+	if !s.columnExists(ctx, "items", "franchise") {
+		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE items ADD COLUMN franchise TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	// Indexed here rather than in schema.sql, which runs before this and
+	// cannot see a column it has not added yet on an existing database.
+	if _, err := s.DB.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_items_franchise ON items(franchise)`); err != nil {
+		return err
 	}
 	// collections.type was added after the initial release.
 	if !s.columnExists(ctx, "collections", "type") {
@@ -256,9 +270,9 @@ func (s *Store) ItemsWithoutGallery(ctx context.Context, series string) ([]strin
 }
 
 func (s *Store) GetItem(ctx context.Context, id string) (*Item, error) {
-	row := s.DB.QueryRowContext(ctx, `SELECT id, series, category, name, name_zh, release_date, price, status, notes, photo_url, created_at, updated_at FROM items WHERE id=?`, id)
+	row := s.DB.QueryRowContext(ctx, `SELECT id, series, category, name, name_zh, release_date, price, status, notes, photo_url, franchise, created_at, updated_at FROM items WHERE id=?`, id)
 	var it Item
-	err := row.Scan(&it.ID, &it.Series, &it.Category, &it.Name, &it.NameZh, &it.ReleaseDate, &it.Price, &it.Status, &it.Notes, &it.PhotoURL, &it.CreatedAt, &it.UpdatedAt)
+	err := row.Scan(&it.ID, &it.Series, &it.Category, &it.Name, &it.NameZh, &it.ReleaseDate, &it.Price, &it.Status, &it.Notes, &it.PhotoURL, &it.Franchise, &it.CreatedAt, &it.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -307,6 +321,10 @@ func (s *Store) ListItems(ctx context.Context, f ItemFilter) ([]Item, error) {
 		conds = append(conds, "category=?")
 		args = append(args, f.Category)
 	}
+	if f.Franchise != "" {
+		conds = append(conds, "franchise=?")
+		args = append(args, f.Franchise)
+	}
 	if f.Status != "" {
 		conds = append(conds, "status=?")
 		args = append(args, f.Status)
@@ -324,7 +342,7 @@ func (s *Store) ListItems(ctx context.Context, f ItemFilter) ([]Item, error) {
 		where = " WHERE " + strings.Join(conds, " AND ")
 	}
 	// Order: items with release_date first (newest first), then undated by id desc.
-	sqlStr := `SELECT id, series, category, name, name_zh, release_date, price, status, notes, photo_url, created_at, updated_at FROM items` + where +
+	sqlStr := `SELECT id, series, category, name, name_zh, release_date, price, status, notes, photo_url, franchise, created_at, updated_at FROM items` + where +
 		` ORDER BY (release_date != '') DESC, release_date DESC, id DESC`
 	if f.Limit > 0 {
 		sqlStr += fmt.Sprintf(" LIMIT %d OFFSET %d", f.Limit, f.Offset)
@@ -337,7 +355,7 @@ func (s *Store) ListItems(ctx context.Context, f ItemFilter) ([]Item, error) {
 	var out []Item
 	for rows.Next() {
 		var it Item
-		if err := rows.Scan(&it.ID, &it.Series, &it.Category, &it.Name, &it.NameZh, &it.ReleaseDate, &it.Price, &it.Status, &it.Notes, &it.PhotoURL, &it.CreatedAt, &it.UpdatedAt); err != nil {
+		if err := rows.Scan(&it.ID, &it.Series, &it.Category, &it.Name, &it.NameZh, &it.ReleaseDate, &it.Price, &it.Status, &it.Notes, &it.PhotoURL, &it.Franchise, &it.CreatedAt, &it.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, it)
@@ -534,4 +552,68 @@ func (s *Store) Audit(ctx context.Context, username, action, itemID, detail stri
 	// Best-effort: errors are swallowed because audit failure should never break a user action.
 	_, _ = s.DB.ExecContext(ctx, `INSERT INTO audit_log(ts, username, action, item_id, detail) VALUES(?,?,?,?,?)`,
 		time.Now().Unix(), username, action, itemID, detail)
+}
+
+// --- Franchise ---
+
+// SetFranchise tags a batch of items with the work they come from. Scraped
+// separately from the product-line listings: /series/<slug>/ is Bandai's own
+// index of which kits belong to which show, which is the only authority on a
+// question the titles answer inconsistently ("ティファ・アディール" names a
+// character, not a series).
+//
+// Only ever writes rows that already exist — the series pages also list kits
+// from lines this app does not collect, and those must not appear as items
+// with a franchise and nothing else.
+func (s *Store) SetFranchise(ctx context.Context, ids []string, franchise string) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	st, err := tx.PrepareContext(ctx, `UPDATE items SET franchise=? WHERE id=?`)
+	if err != nil {
+		return 0, err
+	}
+	defer st.Close()
+	n := 0
+	for _, id := range ids {
+		res, err := st.ExecContext(ctx, franchise, id)
+		if err != nil {
+			return n, err
+		}
+		if k, _ := res.RowsAffected(); k > 0 {
+			n++
+		}
+	}
+	return n, tx.Commit()
+}
+
+// FranchisesUsed lists the works present, optionally within one collection, so
+// the filter only ever offers values that would return something.
+func (s *Store) FranchisesUsed(ctx context.Context, series string) ([]string, error) {
+	q := `SELECT DISTINCT franchise FROM items WHERE franchise != ''`
+	args := []any{}
+	if series != "" {
+		q += ` AND series = ?`
+		args = append(args, series)
+	}
+	q += ` ORDER BY franchise`
+	rows, err := s.DB.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
 }

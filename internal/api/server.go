@@ -93,6 +93,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/collections", authd(s.listCollections))
 	mux.Handle("GET /api/stats", authd(s.statsHandler))
 	mux.Handle("GET /api/categories", authd(s.categoriesHandler))
+	mux.Handle("GET /api/franchises", authd(s.franchisesHandler))
+	mux.Handle("POST /api/franchises/refresh", authd(s.retagFranchises))
 	mux.Handle("GET /api/export", authd(s.exportJSON))
 	mux.Handle("POST /api/import", authd(s.importJSON))
 

@@ -19,6 +19,32 @@ import (
 
 // startScrape kicks off a refresh of one collection, or of everything when no
 // slug is given.
+// retagFranchises refreshes the work each item belongs to without re-reading
+// the product lines. 85 series listings take a couple of minutes; a full
+// catalogue pass takes twenty and would not change a single franchise value
+// that this does not.
+func (s *Server) retagFranchises(w http.ResponseWriter, r *http.Request) {
+	user := auth.CurrentUser(r)
+	// BaseCtx, not the request context: see startScrape.
+	err := s.Scraper.StartFranchiseTag(s.BaseCtx, "manual", func(n int, err error) {
+		if err != nil {
+			log.Printf("manual franchise tag: %v", err)
+			return
+		}
+		log.Printf("manual franchise tag: %d item(s) tagged", n)
+		s.Store.Audit(context.WithoutCancel(s.BaseCtx), user, "franchise", "", "tagged="+itoa(n))
+	})
+	if err != nil {
+		if errors.Is(err, scrape.ErrBusy) {
+			writeErr(w, http.StatusConflict, err.Error())
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, s.Scraper.State())
+}
+
 func (s *Server) startScrape(w http.ResponseWriter, r *http.Request) {
 	scope, label := "", "all collections"
 	if slug := strings.ToLower(r.PathValue("slug")); slug != "" {

@@ -9,10 +9,18 @@ CREATE TABLE IF NOT EXISTS items (
     status       TEXT NOT NULL DEFAULT 'none',
     notes        TEXT NOT NULL DEFAULT '',
     photo_url    TEXT NOT NULL DEFAULT '',
+    -- The work a kit comes from (エヴァンゲリオン, デジモンシリーズ, …), as Bandai
+    -- files it under /series/. A separate axis from `series`, which holds the
+    -- product line: RG 初号機 is a GUNPLA kit AND an Evangelion one, and a
+    -- collection cannot express both.
+    franchise    TEXT NOT NULL DEFAULT '',
     created_at   INTEGER NOT NULL,
     updated_at   INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_items_series       ON items(series);
+-- idx_items_franchise is created in migrate(), not here: this file runs first
+-- and CREATE TABLE IF NOT EXISTS is a no-op on an existing database, so the
+-- column does not exist yet and indexing it fails the whole schema step.
 CREATE INDEX IF NOT EXISTS idx_items_status       ON items(status);
 CREATE INDEX IF NOT EXISTS idx_items_release_date ON items(release_date);
 

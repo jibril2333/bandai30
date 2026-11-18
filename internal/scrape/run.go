@@ -49,7 +49,7 @@ type RunState struct {
 	// Progress within the current collection. The gallery pass is the slow
 	// part of a full run — minutes per collection — so it needs its own
 	// counter or the UI looks frozen.
-	Phase     string `json:"phase"`     // "listing" | "gallery" | ""
+	Phase     string `json:"phase"`     // "listing" | "gallery" | "franchise" | ""
 	ItemsDone int    `json:"itemsDone"` // items processed in this phase
 	ItemsAll  int    `json:"itemsAll"`  // items to process in this phase
 
@@ -128,6 +128,36 @@ func (c *Client) finish(ctx context.Context, scope, trigger string, mode Mode) (
 	}
 	c.mu.Unlock()
 	return fresh, err
+}
+
+// StartFranchiseTag runs the franchise pass on its own, so the works can be
+// refreshed without re-reading every product line: 85 series listings against
+// rows that are already in the database, rather than 3,200 items.
+//
+// Shares the single-run slot with a scrape, because both write items.
+func (c *Client) StartFranchiseTag(ctx context.Context, trigger string, done func(int, error)) error {
+	if err := c.begin("", trigger, ModeIncremental); err != nil {
+		return err
+	}
+	go func() {
+		c.setPhase("franchise", 0, len(Franchises))
+		n, err := c.TagFranchises(ctx)
+
+		c.mu.Lock()
+		c.state.Running = false
+		c.state.Current = ""
+		c.state.Phase, c.state.ItemsDone, c.state.ItemsAll = "", 0, 0
+		c.state.FinishedAt = time.Now().Unix()
+		if err != nil {
+			c.state.Err = err.Error()
+		}
+		c.mu.Unlock()
+
+		if done != nil {
+			done(n, err)
+		}
+	}()
+	return nil
 }
 
 func (c *Client) run(ctx context.Context, scope, trigger string, mode Mode) ([]string, error) {
@@ -213,6 +243,22 @@ func (c *Client) run(ctx context.Context, scope, trigger string, mode Mode) ([]s
 				return fresh, ctx.Err()
 			case <-time.After(3 * time.Second):
 			}
+		}
+	}
+
+	// Tagging runs once at the end rather than per collection: the series
+	// listings cut across every line, so doing it inside the loop would walk
+	// the same forty-five pages once per collection. Only on a full-catalogue
+	// run — a single-collection refresh has no business rewriting the works
+	// of items it did not touch.
+	if scope == "" {
+		c.setPhase("franchise", 0, len(Franchises))
+		if n, err := c.TagFranchises(ctx); err != nil {
+			c.mu.Lock()
+			c.state.Failures = append(c.state.Failures, "franchise: "+err.Error())
+			c.mu.Unlock()
+		} else {
+			log.Printf("%s: tagged %d item(s) with a franchise", trigger, n)
 		}
 	}
 	return fresh, nil

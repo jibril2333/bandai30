@@ -38,7 +38,7 @@ const state = {
   items: [],
   col: null,            // active collection object
   cats: [],
-  filter: { search: '', category: 'all', status: 'all' },
+  filter: { search: '', category: 'all', franchise: 'all', status: 'all' },
   view: localStorage.getItem('view') === 'list' ? 'list' : 'grid',
   editingId: null,
 };
@@ -70,6 +70,7 @@ const api = {
   collections: () => api.fetch('/api/collections'),
   stats: () => api.fetch('/api/stats'),
   categories: (code) => api.fetch('/api/categories' + (code ? `?series=${encodeURIComponent(code)}` : '')),
+  franchises: (code) => api.fetch('/api/franchises' + (code ? `?series=${encodeURIComponent(code)}` : '')),
   listItems: (q) => {
     const qs = new URLSearchParams(Object.fromEntries(Object.entries(q || {}).filter(([_, v]) => v && v !== 'all')));
     return api.fetch('/api/items' + (qs.toString() ? `?${qs}` : ''));
@@ -90,6 +91,7 @@ const api = {
   settings: () => api.fetch('/api/settings'),
   saveSettings: (s) => api.fetch('/api/settings', { method: 'PUT', body: s }),
   testNtfy: () => api.fetch('/api/settings/ntfy-test', { method: 'POST' }),
+  retagFranchises: () => api.fetch('/api/franchises/refresh', { method: 'POST' }),
   backups: () => api.fetch('/api/backups'),
   runBackup: () => api.fetch('/api/backups', { method: 'POST' }),
 };
@@ -449,7 +451,14 @@ async function renderSettings() {
           <div class="prog-fail" id="s-progress-fail" hidden></div>
         </div>
       </div>
-      <div class="set-actions">${refreshBtnHTML('')}</div>
+      <div class="set-row">
+        <div class="set-label"><b>作品标注</b><small>从万代的作品索引重读每件属于哪部作品，用于目录页的「作品」筛选</small></div>
+        <button id="s-retag">重新标注</button>
+      </div>
+      <div class="set-actions">
+        <span class="set-state" id="r-state"></span>
+        ${refreshBtnHTML('')}
+      </div>
     </div>
 
     <div class="set-card">
@@ -552,6 +561,17 @@ async function renderSettings() {
     }
   };
 
+  $('s-retag').onclick = async () => {
+    const st = $('r-state');
+    st.textContent = '标注中…（约两分钟）'; st.className = 'set-state';
+    try {
+      await api.retagFranchises();
+      st.textContent = '已开始，完成后目录页即可按作品筛选'; st.className = 'set-state ok';
+    } catch (e) {
+      st.textContent = '失败: ' + e.message; st.className = 'set-state err';
+    }
+  };
+
   $('b-now').onclick = async () => {
     const st = $('b-state');
     st.textContent = '备份中…'; st.className = 'set-state';
@@ -570,12 +590,14 @@ async function renderSettings() {
 async function loadCollection(code) {
   state.col = byCode(code);
   if (!state.col) { location.hash = ''; return; }
-  const [items, cats] = await Promise.all([
+  const [items, cats, frs] = await Promise.all([
     api.listItems({ series: code }),
     api.categories(code),
+    api.franchises(code).catch(() => []),
   ]);
   state.items = items;
   state.cats = cats;
+  state.franchises = frs;
   if (state.filter.category !== 'all' && !cats.includes(state.filter.category)) state.filter.category = 'all';
   renderCollectionPage();
 }
@@ -626,9 +648,19 @@ function renderCollectionPage() {
         ${state.cats.length ? `<div class="chipset" id="cat-chips"><span class="setlbl">分类</span>
           ${catChips.map(c => `<span class="pill ${state.filter.category === c.k ? 'active' : ''}" data-cat="${escapeAttr(c.k)}">${escapeHtml(c.l)}<span class="count">${c.n}</span></span>`).join('')}
         </div><span class="setdiv"></span>` : ''}
+        ${state.franchises && state.franchises.length ? `<div class="chipset" id="fr-wrap"><span class="setlbl">作品</span>
+          <select id="fr-select" class="fr-select">
+            <option value="all">全部</option>
+            ${state.franchises.map(fr => `<option value="${escapeAttr(fr)}"${state.filter.franchise === fr ? ' selected' : ''}>${escapeHtml(fr)}</option>`).join('')}
+          </select>
+        </div><span class="setdiv"></span>` : ''}
         <div class="chipset" id="status-chips"><span class="setlbl">状态</span>
           ${statusSet(col.type).map(s => `<span class="pill ${state.filter.status === s.key ? 'active' : ''}" data-status="${s.key}">${s.label}<span class="count">${counts[s.key] ?? 0}</span></span>`).join('')}
         </div>
+      </div>
+      <div class="filter-summary" id="filter-summary" hidden>
+        <span id="filter-count"></span>
+        <button id="filter-clear" class="ghost-sm">清除筛选</button>
       </div>
       <div id="filter-backdrop"${state.filterOpen ? ' class="show"' : ''}></div>
       <button id="filter-fab" aria-label="搜索与筛选">🔍${activeFilterCount() ? `<span class="fab-badge">${activeFilterCount()}</span>` : ''}</button>
@@ -773,6 +805,7 @@ function wireRefresh() {
 
 function activeFilterCount() {
   return (state.filter.category !== 'all' ? 1 : 0)
+       + (state.filter.franchise !== 'all' ? 1 : 0)
        + (state.filter.status !== 'all' ? 1 : 0)
        + (state.filter.search.trim() ? 1 : 0);
 }
@@ -830,6 +863,18 @@ function wireToolbar() {
       applyFilter();
     };
   });
+  const frSel = $('fr-select');
+  if (frSel) frSel.onchange = () => { state.filter.franchise = frSel.value; applyFilter(); updateFabBadge(); };
+
+  $('filter-clear').onclick = () => {
+    state.filter = { search: '', category: 'all', franchise: 'all', status: 'all' };
+    $('search').value = '';
+    if (frSel) frSel.value = 'all';
+    syncSearchUI();
+    refreshChipActive();
+    applyFilter();
+  };
+
   // grid / list view toggle
   document.querySelectorAll('.view-toggle button').forEach(el => {
     el.onclick = () => {
@@ -906,18 +951,29 @@ function applyFilter() {
   const grid = $('grid');
   if (!grid) return;
   const q = state.filter.search.trim().toLowerCase();
-  const cat = state.filter.category, st = state.filter.status;
+  const cat = state.filter.category, st = state.filter.status, fr = state.filter.franchise;
   let visible = 0;
   grid.querySelectorAll('.item').forEach(el => {
     const show =
       (cat === 'all' || el.dataset.cat === cat) &&
       (st === 'all' || el.dataset.status === st) &&
+      (fr === 'all' || el.dataset.fr === fr) &&
       (!q || (el.dataset.search || '').includes(q));
     el.style.display = show ? '' : 'none';
     if (show) visible++;
   });
   const empty = $('empty');
   if (empty) empty.hidden = visible > 0;
+
+  // Say what the filters are doing. Highlighted chips are the only signal
+  // otherwise, and with four axes that is easy to lose track of.
+  const sum = $('filter-summary');
+  if (sum) {
+    const total = grid.querySelectorAll('.item').length;
+    const on = visible !== total;
+    sum.hidden = !on;
+    if (on) $('filter-count').textContent = `${visible} / ${total} 件`;
+  }
 }
 
 // Rebuild a single card in place (after its status changed) — one image, cheap.
@@ -977,7 +1033,7 @@ function cardHTML(m, type, today) {
   const upcoming = rd && rd > today;
   const search = `${m.name} ${m.nameZh} ${m.notes}`.toLowerCase();
   return `
-    <div class="item card${m.status !== 'none' ? ' is-marked s-' + m.status : ''}" data-id="${escapeAttr(m.id)}" data-cat="${escapeAttr(m.category || '')}" data-status="${escapeAttr(m.status)}" data-search="${escapeAttr(search)}">
+    <div class="item card${m.status !== 'none' ? ' is-marked s-' + m.status : ''}" data-id="${escapeAttr(m.id)}" data-cat="${escapeAttr(m.category || '')}" data-status="${escapeAttr(m.status)}" data-fr="${escapeAttr(m.franchise || '')}" data-search="${escapeAttr(search)}">
       <div class="photo${m.photoUrl ? '' : ' noimg'}">
         ${m.photoUrl ? `<img data-src="${escapeAttr(thumbURL(m.photoUrl))}" decoding="async" alt="">` : ''}
         ${m.status !== 'none' ? `<span class="status-chip s-${m.status}">${statusLabel(m.status, type)}</span>` : ''}
@@ -1001,7 +1057,7 @@ function rowHTML(m, type, today) {
   const upcoming = rd && rd > today;
   const search = `${m.name} ${m.nameZh} ${m.notes}`.toLowerCase();
   return `
-    <div class="item row-item${m.status !== 'none' ? ' is-marked s-' + m.status : ''}" data-id="${escapeAttr(m.id)}" data-cat="${escapeAttr(m.category || '')}" data-status="${escapeAttr(m.status)}" data-search="${escapeAttr(search)}">
+    <div class="item row-item${m.status !== 'none' ? ' is-marked s-' + m.status : ''}" data-id="${escapeAttr(m.id)}" data-cat="${escapeAttr(m.category || '')}" data-status="${escapeAttr(m.status)}" data-fr="${escapeAttr(m.franchise || '')}" data-search="${escapeAttr(search)}">
       <div class="ri-photo${m.photoUrl ? '' : ' noimg'}">${m.photoUrl ? `<img data-src="${escapeAttr(thumbURL(m.photoUrl))}" decoding="async" alt="">` : ''}</div>
       <div class="ri-main">
         <div class="ri-name">${escapeHtml(m.name || m.nameZh || '(未命名)')}</div>

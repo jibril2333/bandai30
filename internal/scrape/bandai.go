@@ -262,6 +262,17 @@ func firstSubmatch(re *regexp.Regexp, b []byte) string {
 // signatures that expired hours ago and every image fetch returns 403. Asking
 // for an uncached render costs ~60 requests a week and gets both fresh
 // signatures and newly listed items.
+// seriesURL mirrors brandURL for the /series/ listings, cache-busting for the
+// same reason: a listing held in a CDN for more than a few minutes serves
+// image URLs whose signatures have already expired.
+func (c *Client) seriesURL(slug string, page int) string {
+	bust := time.Now().UnixNano()
+	if page <= 1 {
+		return fmt.Sprintf("https://bandai-hobby.net/series/%s/?_=%d", slug, bust)
+	}
+	return fmt.Sprintf("https://bandai-hobby.net/series/%s/?p=%d&_=%d", slug, page, bust)
+}
+
 func (c *Client) brandURL(brand string, page int) string {
 	bust := time.Now().UnixNano()
 	if page <= 1 {
